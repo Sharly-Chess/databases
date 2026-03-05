@@ -1,0 +1,39 @@
+name: FFE Database Update
+
+on:
+  schedule:
+    - cron: '0 5 * * *'  # 5am UTC daily
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-ffe-database:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5.5.0
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Generate FFE SQLite database
+        run: python generate_ffe_sqlite.py
+
+      - name: Publish to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          DB_FILENAME=$(python -c "from generate_ffe_sqlite import DB_FILENAME; print(DB_FILENAME)")
+          TAG="latest"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" "$DB_FILENAME" \
+            --title "FFE Database" \
+            --notes "Auto-updated daily" \
+            --latest=false
