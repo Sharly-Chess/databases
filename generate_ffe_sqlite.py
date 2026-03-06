@@ -18,6 +18,7 @@ import tempfile
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 
@@ -137,7 +138,7 @@ def download_ffe_mdb(target_dir: Path) -> Path:
     if response.status_code != 200:
         raise RuntimeError(f'FFE download failed with HTTP {response.status_code}')
 
-    zip_path = target_dir / 'PapiData.zip'
+    zip_path = target_dir / urlsplit(FFE_DATABASE_URL).path.split('/')[-1]
     zip_path.write_bytes(response.content)
 
     with zipfile.ZipFile(zip_path, 'r') as zf:
