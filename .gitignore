@@ -1,3 +1,5 @@
 /.idea/
 ffe.db
 fide.db
+/ffe/france/download/*
+/ffe/france/archives/*
