@@ -36,7 +36,7 @@ jobs:
       - name: Publish to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Continue for a while to publish to tag latest, used by 3.6.5 clients
+        # Continue for a while to publish to tag latest, used by 4.0.5 clients
         # TODO only keep ffe-latest in future releases
         run: |
           DB_FILENAME=$(python -c "from generate_ffe_sqlite import DB_FILENAME; print(DB_FILENAME)")
