@@ -28,7 +28,7 @@ jobs:
       - name: Generate FFE SQLite database
         env:
           ENC_PASSWORD: ${{ secrets.FFE_DATABASE_ENC_PASSWORD }}
-        run: python generate_ffe_sqlite.py
+        run: python generate_ffe_sqlite.py --key="$ENC_PASSWORD"
 
       - name: Zip database with password
         env:
