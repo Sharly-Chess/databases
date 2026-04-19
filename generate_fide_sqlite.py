@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Standalone script: download the FFE player database (Data.mdb), convert it to SQLite.
-Does not depend on the full Sharly Chess app environment — only requires `requests`.
+Does not depend on the full Sharly Chess app environment — only requires `requests` and `cryptography`.
 """
 
 import argparse
@@ -15,6 +15,7 @@ from xml.etree import ElementTree
 
 import requests
 
+from aes_cbc import AesCbc
 from progress import Progress
 
 FIDE_DATABASE_URL = 'https://ratings.fide.com/download/players_list_xml_legacy.zip'
@@ -23,6 +24,7 @@ XML_FILENAME = 'players_list_xml.xml'
 # Increment when the schema changes so consumers can detect the format version.
 DB_VERSION = 1
 DB_FILENAME = f'fide_players_v{DB_VERSION}.db'
+ENC_DB_FILENAME = f'{DB_FILENAME}.enc'
 
 
 # ---------------------------------------------------------------------------
@@ -195,16 +197,28 @@ def main():
     parser.add_argument(
         '--output',
         type=Path,
-        default=Path(DB_FILENAME),
-        help='Path for the output SQLite file',
+        default=Path(ENC_DB_FILENAME),
+        help='Path for the output SQLite encrypted file',
+    )
+    parser.add_argument(
+        '-k',
+        '--key',
+        type=str,
+        required=True,
+        help='Key used for AES-CBC encryption',
     )
     args = parser.parse_args()
+    output_file: Path = args.output.resolve()
+    key: str = args.key
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
         xml_path = download_fide_xml(tmp)
-        convert_xml_to_sqlite(xml_path, args.output.resolve())
+        sqlite_file: Path = tmp / DB_FILENAME
+        convert_xml_to_sqlite(xml_path, sqlite_file)
+        AesCbc.encrypt_file(sqlite_file, output_file, key)
 
+    print(f'FIDE SQLite database encrypted to {output_file}.')
 
 if __name__ == '__main__':
     main()
