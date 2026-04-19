@@ -21,27 +21,23 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          pip install requests
+          pip install cryptography
 
       - name: Generate FIDE SQLite database
-        run: python generate_fide_sqlite.py
-
-      - name: Zip database with password
         env:
-          ZIP_PASSWORD: ${{ secrets.FIDE_DATABASE_ZIP_PASSWORD }}
-        run: |
-          DB_FILENAME=$(python -c "from generate_fide_sqlite import DB_FILENAME; print(DB_FILENAME)")
-          zip -P "$ZIP_PASSWORD" "${DB_FILENAME%.db}.zip" "$DB_FILENAME"
+          ENC_PASSWORD: ${{ secrets.FIDE_DATABASE_ENC_PASSWORD }}
+        run: python generate_fide_sqlite.py --key="$ENC_PASSWORD"
 
       - name: Publish to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          DB_FILENAME=$(python -c "from generate_fide_sqlite import DB_FILENAME; print(DB_FILENAME)")
-          ZIP_FILENAME="${DB_FILENAME%.db}.zip"
+          ENC_DB_FILENAME=$(python -c "from generate_fide_sqlite import ENC_DB_FILENAME; print(ENC_DB_FILENAME)")
           TAG="fide-latest"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ZIP_FILENAME" \
+          gh release create "$TAG" "$ENC_DB_FILENAME" \
             --title "FIDE Database" \
             --notes "Auto-updated daily" \
             --latest=false
