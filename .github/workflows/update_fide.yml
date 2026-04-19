@@ -21,7 +21,9 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          pip install requests
+          pip install cryptography
 
       - name: Generate FIDE SQLite database
         env:
