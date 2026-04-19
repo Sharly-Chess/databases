@@ -2,7 +2,7 @@ name: FIDE Database Update
 
 on:
   schedule:
-    - cron: '0 5 * * *'  # 5am UTC daily
+    - cron: '0 */2 * * *'  # 5am UTC daily
   workflow_dispatch:
 
 permissions:

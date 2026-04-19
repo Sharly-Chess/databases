@@ -24,7 +24,7 @@ XML_FILENAME = 'players_list_xml.xml'
 # Increment when the schema changes so consumers can detect the format version.
 DB_VERSION = 1
 DB_FILENAME = f'fide_players_v{DB_VERSION}.db'
-ENC_DB_FILENAME = f'{DB_FILENAME}.enc'
+ENC_DB_FILENAME = DB_FILENAME.replace('.db', '.enc')
 
 
 # ---------------------------------------------------------------------------
