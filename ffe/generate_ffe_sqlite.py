@@ -26,7 +26,7 @@ sys.path.extend(
     map(
         str,
         [
-            Path(__file__).parents[2],  # The root path
+            Path(__file__).parents[1],  # The root path
         ],
     )
 )
