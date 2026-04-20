@@ -21,10 +21,14 @@ jobs:
           python-version: '3.13'
 
       - name: Install dependencies
-        run: pip install requests
+        run: |
+          pip install requests
+          pip install cryptography
 
       - name: Generate FFE SQLite database
-        run: python generate_ffe_sqlite.py
+        env:
+          ENC_PASSWORD: ${{ secrets.FFE_DATABASE_ENC_PASSWORD }}
+        run: python generate_ffe_sqlite.py --key="$ENC_PASSWORD"
 
       - name: Zip database with password
         env:
@@ -38,18 +42,20 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         # Continue for a while to publish to tag latest, used by 4.0.5 clients
         # TODO only keep ffe-latest in future releases
+        # TODO only keep encrypted file in future releases (remove zip file)
         run: |
           DB_FILENAME=$(python -c "from generate_ffe_sqlite import DB_FILENAME; print(DB_FILENAME)")
+          ENC_DB_FILENAME=$(python -c "from generate_ffe_sqlite import ENC_DB_FILENAME; print(ENC_DB_FILENAME)")
           ZIP_FILENAME="${DB_FILENAME%.db}.zip"
           TAG="latest"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ZIP_FILENAME" \
+          gh release create "$TAG" "$ZIP_FILENAME" "$ENC_DB_FILENAME" \
             --title "FFE Database" \
             --notes "Auto-updated daily" \
             --latest=false
           TAG="ffe-latest"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ZIP_FILENAME" \
+          gh release create "$TAG" "$ZIP_FILENAME" "$ENC_DB_FILENAME" \
             --title "FFE Database" \
             --notes "Auto-updated daily" \
             --latest=false

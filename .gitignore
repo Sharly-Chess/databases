@@ -1,5 +1,5 @@
 /.idea/
-ffe.db
-fide.db
+*.db
+*.enc
 /ffe/france/download/*
 /ffe/france/archives/*

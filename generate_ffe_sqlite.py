@@ -22,6 +22,8 @@ from urllib.parse import urlsplit
 
 import requests
 
+from aes_cbc import AesCbc
+
 PAPI_CONVERTER_VERSION = '1.4.0'
 FFE_DATABASE_URL = 'https://www.echecs.asso.fr/Papi/PapiData.zip'
 FFE_PUBLIC_URL = 'http://echecs.asso.fr'
@@ -30,6 +32,7 @@ MDB_FILENAME = 'Data.mdb'
 # Increment when the schema changes so consumers can detect the format version.
 DB_VERSION = 1
 DB_FILENAME = f'ffe_players_v{DB_VERSION}.db'
+ENC_DB_FILENAME = DB_FILENAME.replace('.db', '.enc')
 
 FFE_LEAGUES = [
     'ARA',
@@ -331,7 +334,16 @@ def main():
         default=Path(DB_FILENAME),
         help='Path for the output SQLite file',
     )
+    parser.add_argument(
+        '-k',
+        '--key',
+        type=str,
+        required=True,
+        help='Key used for AES-CBC encryption',
+    )
     args = parser.parse_args()
+    output_file: Path = args.output.resolve()
+    key: str = args.key
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
@@ -340,10 +352,12 @@ def main():
         convert_mdb_to_sqlite(papi_converter, mdb_path, args.output.resolve())
 
     arbiters = scrape_ffe_arbiters()
-    enrich_with_arbiter_titles(args.output.resolve(), arbiters)
+    enrich_with_arbiter_titles(output_file, arbiters)
 
-    size_mb = args.output.stat().st_size / 1_048_576
+    size_mb = output_file.stat().st_size / 1_048_576
     print(f'Output: {args.output} ({size_mb:.1f} MB)')
+
+    AesCbc.encrypt_file(output_file, Path(ENC_DB_FILENAME), key)
 
 
 if __name__ == '__main__':
