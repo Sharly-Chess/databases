@@ -34,7 +34,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python -c "from fra_schools.generate_fra_schools_sqlite import ENC_DB_FILENAME; print(ENC_DB_FILENAME)"
           ENC_DB_FILENAME=$(python -c "from fra_schools.generate_fra_schools_sqlite import ENC_DB_FILENAME; print(ENC_DB_FILENAME)")
           TAG="fra_schools-latest"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
