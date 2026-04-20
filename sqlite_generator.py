@@ -72,5 +72,5 @@ class SqliteGenerator(ABC):
     def generate_sqlite_database(
         self,
         tmp_dir: Path,
-    ):
+    ) -> Path:
         pass

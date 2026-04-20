@@ -47,7 +47,7 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
     def generate_sqlite_database(
         cls,
         tmp_dir: Path,
-    ):
+    ) -> Path:
         json_path: Path = cls.download_json_file(tmp_dir)
         return cls.convert_json_to_sqlite(json_path)
 

@@ -8,6 +8,7 @@ Does not depend on the full Sharly Chess app environment — only requires `requ
 import os
 import platform
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -138,10 +139,10 @@ class FfeSqliteGenerator(SqliteGenerator):
     def generate_sqlite_database(
         self,
         tmp_dir: Path,
-    ):
+    ) -> Path:
         papi_converter: Path = self.download_papi_converter(tmp_dir)
         mdb_path: Path = self.download_ffe_mdb(tmp_dir)
-        self.convert_mdb_to_sqlite(papi_converter, mdb_path)
+        return self.convert_mdb_to_sqlite(papi_converter, mdb_path)
 
     @staticmethod
     def get_papi_converter_info() -> tuple[str, str, str]:
@@ -236,7 +237,8 @@ class FfeSqliteGenerator(SqliteGenerator):
         self,
         papi_converter: Path,
         mdb_path: Path,
-    ):
+    ) -> Path:
+        sqlite_file: Path = mdb_path.with_suffix('.db')
         sql_path = mdb_path.with_suffix('.sql')
 
         print('Converting MDB to SQL dump via papi-converter...')
@@ -257,21 +259,26 @@ class FfeSqliteGenerator(SqliteGenerator):
             )
 
         print('Importing SQL dump into SQLite...')
-        database: Connection = self._create_sqlite_database(self.db_file)
+        database: Connection = self._create_sqlite_database(sqlite_file)
         cursor: Cursor = database.cursor()
         cursor.executescript(sql_path.read_text(encoding='utf-8'))
         database.commit()
         sql_path.unlink(missing_ok=True)
 
-        if not self.db_file.exists():
+        if not sqlite_file.exists():
             raise RuntimeError('SQLite database was not created')
 
         arbiters = self.scrape_ffe_arbiters()
         self.enrich_with_arbiter_titles(database, arbiters)
 
-        size_mb = self.db_file.stat().st_size / 1_048_576
+        size_mb = sqlite_file.stat().st_size / 1_048_576
         print(f'MDB → SQLite done ({size_mb:.1f} MB)')
 
+        # Save the SQLite file to unzip it later
+        # TODO remove this when not used in future releases
+        shutil.copy(sqlite_file, self.db_file)
+
+        return sqlite_file
 
     @staticmethod
     def _validate_ffe_licence(s: str) -> bool:
