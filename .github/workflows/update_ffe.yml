@@ -2,7 +2,7 @@ name: FFE Database Update
 
 on:
   schedule:
-    - cron: '0 5 * * *'  # 5am UTC daily
+    - cron: '0 */2 * * *'  # Every 2 hours
   workflow_dispatch:
 
 permissions:
