@@ -10,16 +10,33 @@ from aes_ecb import AesEcb
 class SqliteGenerator(ABC):
     """An abstract SQLite generator class."""
 
-    def __init__(
+    def __init__(self):
+        self.output_file: Path = Path(self.default_output_filename)
+        self.key: str = ''
+
+    @property
+    @abstractmethod
+    def description(self) -> str:
+        pass
+
+    @property
+    @abstractmethod
+    def version(self) -> int:
+        pass
+
+    @property
+    @abstractmethod
+    def default_output_filename(self) -> str:
+        pass
+
+    def parse_arguments(
         self,
-        description: str,
-        default_output_filename: str,
     ):
-        parser = argparse.ArgumentParser(description=description)
+        parser = argparse.ArgumentParser(description=self.description)
         parser.add_argument(
             '--output',
             type=Path,
-            default=Path(default_output_filename),
+            required=False,
             help='Path for the output SQLite encrypted file',
         )
         parser.add_argument(
@@ -30,7 +47,8 @@ class SqliteGenerator(ABC):
             help='Key used for AES-CBC encryption',
         )
         args = parser.parse_args()
-        self.output_file: Path = args.output.resolve()
+        if args.output:
+            self.output_file: Path = args.output.resolve()
         self.key: str = args.key
 
     @classmethod
@@ -43,6 +61,7 @@ class SqliteGenerator(ABC):
         return connect(database=sqlite_file, detect_types=1, uri=True)
 
     def run(self):
+        self.parse_arguments()
         with tempfile.TemporaryDirectory() as tmp:
             sqlite_file: Path = self.generate_sqlite_database(Path(tmp))
             AesEcb.encrypt_file(sqlite_file, self.output_file, self.key)

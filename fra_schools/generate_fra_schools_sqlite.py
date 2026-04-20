@@ -30,11 +30,21 @@ from sqlite_generator import SqliteGenerator
 
 
 # Increment when the schema changes so consumers can detect the format version.
-DB_VERSION = 1
-ENC_DB_FILENAME = f'fra_schools_v{DB_VERSION}.enc'
 
 
 class FraSchoolsSqliteGenerator(SqliteGenerator):
+
+    @property
+    def description(self) -> str:
+        return 'Generate FRA Schools database'
+
+    @property
+    def version(self) -> int:
+        return 1
+
+    @property
+    def default_output_filename(self) -> str:
+        return f'fra_schools_v{self.version}.enc'
 
     @classmethod
     def generate_sqlite_database(
@@ -289,7 +299,4 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
 
 
 if __name__ == '__main__':
-    FraSchoolsSqliteGenerator(
-        description='Generate FRA Schools database',
-        default_output_filename=ENC_DB_FILENAME,
-    ).run()
+    FraSchoolsSqliteGenerator().run()
