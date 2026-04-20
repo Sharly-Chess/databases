@@ -108,6 +108,8 @@ class PlayerRowCleaner:
     def clean(player: dict[str, Any]) -> dict[str, Any]:
         player['title'] = {
             '': '',
+            'c': 'CM',
+            'cf': 'WCM',
             'ff': 'WFM',
             'f': 'FM',
             'mf': 'WIM',
