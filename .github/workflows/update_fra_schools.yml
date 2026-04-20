@@ -34,10 +34,10 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ENC_DB_FILENAME=$(python -c "from fra_schools.generate_fra_schools_sqlite import ENC_DB_FILENAME; print(ENC_DB_FILENAME)")
-          TAG="fra_schools-latest"
+          ENC_DB_FILENAME=$(python -c "from fra_schools.generate_fra_schools_sqlite import FraSchoolsSqliteGenerator as sqlite_generator; print(sqlite_generator().output_file)")
+          TAG="fra-schools-latest"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ZIP_FILENAME" "$ENC_DB_FILENAME" \
+          gh release create "$TAG" "$ENC_DB_FILENAME" \
             --title "FRA Schools Database" \
             --notes "Auto-updated daily" \
             --latest=false
