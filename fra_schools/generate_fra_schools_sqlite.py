@@ -34,7 +34,7 @@ DB_VERSION = 1
 ENC_DB_FILENAME = f'fra_schools_v{DB_VERSION}.enc'
 
 
-class FraSchoolsGenerator(SqliteGenerator):
+class FraSchoolsSqliteGenerator(SqliteGenerator):
 
     @classmethod
     def generate_sqlite_database(
@@ -289,7 +289,7 @@ class FraSchoolsGenerator(SqliteGenerator):
 
 
 if __name__ == '__main__':
-    FraSchoolsGenerator(
+    FraSchoolsSqliteGenerator(
         description='Generate FRA Schools database',
         default_output_filename=ENC_DB_FILENAME,
     ).run()
