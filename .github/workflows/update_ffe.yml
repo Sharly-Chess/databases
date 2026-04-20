@@ -49,7 +49,7 @@ jobs:
           ZIP_FILENAME="${DB_FILENAME%.db}.zip"
           TAG="latest"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ZIP_FILENAME" "$ENC_DB_FILENAME" \
+          gh release create "$TAG" "$ZIP_FILENAME" \
             --title "FFE Database" \
             --notes "Auto-updated daily" \
             --latest=false
