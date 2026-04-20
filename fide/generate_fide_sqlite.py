@@ -5,6 +5,7 @@ Does not depend on the full Sharly Chess app environment — only requires `requ
 """
 
 import argparse
+import sys
 import tempfile
 import zipfile
 from pathlib import Path
@@ -14,6 +15,15 @@ from urllib.parse import urlsplit
 from xml.etree import ElementTree
 
 import requests
+
+sys.path.extend(
+    map(
+        str,
+        [
+            Path(__file__).parents[2],  # The root path
+        ],
+    )
+)
 
 from aes_ecb import AesEcb
 from progress import Progress

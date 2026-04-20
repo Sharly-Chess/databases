@@ -22,6 +22,15 @@ from urllib.parse import urlsplit
 
 import requests
 
+sys.path.extend(
+    map(
+        str,
+        [
+            Path(__file__).parents[2],  # The root path
+        ],
+    )
+)
+
 from aes_ecb import AesEcb
 
 PAPI_CONVERTER_VERSION = '1.4.0'
