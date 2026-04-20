@@ -29,9 +29,6 @@ from progress import Progress
 from sqlite_generator import SqliteGenerator
 
 
-# Increment when the schema changes so consumers can detect the format version.
-
-
 class FraSchoolsSqliteGenerator(SqliteGenerator):
 
     @property

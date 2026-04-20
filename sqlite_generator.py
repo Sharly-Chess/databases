@@ -22,6 +22,7 @@ class SqliteGenerator(ABC):
     @property
     @abstractmethod
     def version(self) -> int:
+        # Increment when the schema changes so consumers can detect the format version.
         pass
 
     @property
