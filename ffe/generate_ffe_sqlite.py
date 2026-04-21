@@ -17,11 +17,8 @@ import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
 from sqlite3 import Connection, Cursor
-from urllib.parse import urlsplit
 
 import requests
-
-from progress import Progress
 
 sys.path.extend(
     map(
@@ -32,6 +29,7 @@ sys.path.extend(
     )
 )
 
+from progress import Progress
 from sqlite_generator import SqliteGenerator
 
 
