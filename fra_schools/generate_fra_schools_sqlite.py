@@ -13,9 +13,6 @@ from sqlite3 import Connection, Cursor
 from typing import Callable, Any
 from urllib.parse import urlsplit
 
-import requests
-from requests import HTTPError
-
 sys.path.extend(
     map(
         str,
@@ -63,45 +60,38 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
             base_url
             + '?'
             + urllib.parse.urlencode(
-            {
-                'select': ','.join(
-                    [
-                        'code_postal',
-                        'code_departement',
-                        'libelle_departement',
-                        'nom_commune',
-                        'type_etablissement',
-                        'statut_public_prive',
-                        'identifiant_de_l_etablissement',
-                        'nom_etablissement',
-                    ]
-                ),
-                'where': 'type_etablissement IN ("' + '" ,"'.join(types) + '")',
-                'order_by': ','.join(
-                    [
-                        'code_postal',
-                        'nom_commune',
-                        'type_etablissement',
-                        'statut_public_prive',
-                        'identifiant_de_l_etablissement',
-                    ]
-                ),
-                'limit': -1,
-                'offset': 0,
-                'timezone': 'UTC',
-            }
-        )
+                {
+                    'select': ','.join(
+                        [
+                            'code_postal',
+                            'code_departement',
+                            'libelle_departement',
+                            'nom_commune',
+                            'type_etablissement',
+                            'statut_public_prive',
+                            'identifiant_de_l_etablissement',
+                            'nom_etablissement',
+                        ]
+                    ),
+                    'where': 'type_etablissement IN ("' + '" ,"'.join(types) + '")',
+                    'order_by': ','.join(
+                        [
+                            'code_postal',
+                            'nom_commune',
+                            'type_etablissement',
+                            'statut_public_prive',
+                            'identifiant_de_l_etablissement',
+                        ]
+                    ),
+                    'limit': -1,
+                    'offset': 0,
+                    'timezone': 'UTC',
+                }
+            )
         )
 
-        json_file: Path = source_file_dir / 'schools.json'
         print(f'Downloading data from [{url}].')
-        response: requests.Response = requests.get(url)
-        if not response.ok:
-            raise HTTPError(f'Download failed with status code {response.status_code}: {response.text}')
-        json_file.write_bytes(response.content)
-        if not json_file.exists():
-            raise HTTPError(f'No data received.')
-        return json_file
+        return cls._download_file(url, source_file_dir, 'schools.json')
 
     @classmethod
     def convert_json_to_sqlite(
@@ -235,6 +225,7 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
             database.executemany(department_query, to_write_departments)
         if to_write_schools:
             database.executemany(school_query, to_write_schools)
+        progress.log(school_count)
         database.commit()
 
         database.execute(

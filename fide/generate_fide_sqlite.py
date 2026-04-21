@@ -9,10 +9,7 @@ import zipfile
 from pathlib import Path
 from sqlite3 import Connection, Cursor
 from typing import Callable, Any
-from urllib.parse import urlsplit
 from xml.etree import ElementTree
-
-import requests
 
 sys.path.extend(
     map(
@@ -57,12 +54,7 @@ class FideSqliteGenerator(SqliteGenerator):
         cls,
         target_dir: Path) -> Path:
         print(f'Downloading FIDE database from {cls.FIDE_DATABASE_URL}...')
-        response = requests.get(cls.FIDE_DATABASE_URL, allow_redirects=True, timeout=60)
-        if response.status_code != 200:
-            raise RuntimeError(f'FIDE download failed with HTTP {response.status_code}')
-
-        zip_path = target_dir / urlsplit(cls.FIDE_DATABASE_URL).path.split('/')[-1]
-        zip_path.write_bytes(response.content)
+        zip_path: Path = cls._download_file(cls.FIDE_DATABASE_URL, target_dir)
 
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(target_dir)

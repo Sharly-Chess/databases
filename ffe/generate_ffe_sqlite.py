@@ -21,6 +21,8 @@ from urllib.parse import urlsplit
 
 import requests
 
+from progress import Progress
+
 sys.path.extend(
     map(
         str,
@@ -190,11 +192,7 @@ class FfeSqliteGenerator(SqliteGenerator):
             f'/v{cls.PAPI_CONVERTER_VERSION}/{archive_filename}'
         )
         print(f'Downloading papi-converter from {url}...')
-        response = requests.get(url, timeout=60)
-        response.raise_for_status()
-
-        archive_path = install_dir / archive_filename
-        archive_path.write_bytes(response.content)
+        archive_path: Path = cls._download_file(url, install_dir)
 
         if archive_filename.endswith('.tar.gz'):
             with tarfile.open(archive_path, 'r:gz') as tar:
@@ -217,12 +215,7 @@ class FfeSqliteGenerator(SqliteGenerator):
         target_dir: Path,
     ) -> Path:
         print(f'Downloading FFE database from {cls.FFE_DATABASE_URL}...')
-        response = requests.get(cls.FFE_DATABASE_URL, allow_redirects=True, timeout=60)
-        if response.status_code != 200:
-            raise RuntimeError(f'FFE download failed with HTTP {response.status_code}')
-
-        zip_path = target_dir / urlsplit(cls.FFE_DATABASE_URL).path.split('/')[-1]
-        zip_path.write_bytes(response.content)
+        zip_path: Path = cls._download_file(cls.FFE_DATABASE_URL, target_dir)
 
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(target_dir)
@@ -262,6 +255,7 @@ class FfeSqliteGenerator(SqliteGenerator):
         database: Connection = self._create_sqlite_database(sqlite_file)
         cursor: Cursor = database.cursor()
         cursor.executescript(sql_path.read_text(encoding='utf-8'))
+        cursor.close()
         database.commit()
         sql_path.unlink(missing_ok=True)
 
@@ -270,6 +264,7 @@ class FfeSqliteGenerator(SqliteGenerator):
 
         arbiters = self.scrape_ffe_arbiters()
         self.enrich_with_arbiter_titles(database, arbiters)
+        database.close()
 
         size_mb = sqlite_file.stat().st_size / 1_048_576
         print(f'MDB → SQLite done ({size_mb:.1f} MB)')
@@ -299,7 +294,8 @@ class FfeSqliteGenerator(SqliteGenerator):
 
         arbiters: dict[str, str] = {}
 
-        for league in cls.FFE_LEAGUES:
+        progress: Progress = Progress(len(cls.FFE_LEAGUES), delay=1)
+        for index, league in enumerate(cls.FFE_LEAGUES, start=1):
             url = f'{cls.FFE_PUBLIC_URL}/ListeArbitres.aspx?Action=DNALIGUE&Ligue={league}'
             page = 1
             while True:
@@ -334,8 +330,7 @@ class FfeSqliteGenerator(SqliteGenerator):
                 if not p.has_next_page:
                     break
                 page += 1
-
-            print(f'  {league}: done')
+            progress.log(index)
 
         print(f'Scraped {len(arbiters)} arbiters in total.')
         return arbiters

@@ -11,7 +11,6 @@ class Progress:
         delay: int = 10,
     ):
         self.total_count = total_count
-        assert self.total_count > 0
         self.delay: int = delay
         assert self.delay > 0
         self.start_time: float = time()
@@ -22,6 +21,8 @@ class Progress:
         self,
         count: int,
     ):
+        if not self.total_count:
+            return
         now: float = time()
         if now - self.last_message_time < self.delay:
             return
