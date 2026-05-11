@@ -179,7 +179,7 @@ FROM
     CLUB, JOUEUR
 WHERE 
     CLUB.Ref = JOUEUR.ClubRef 
-    AND (JOUEUR.affType IN ('A') OR JOUEUR.Federation <> 'FRA')
+    AND JOUEUR.Federation = 'FRA'
     {f'AND JOUEUR.Elo >= {elo_min}' if elo_min else ''}
     {f'AND JOUEUR.Elo <= {elo_max}' if elo_max else ''}
     {f'AND JOUEUR.Sexe = \'F\'' if women_only else ''}
