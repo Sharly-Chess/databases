@@ -1,12 +1,3 @@
-#!/usr/bin/env python3
-"""
-Standalone script: generate a CSV file with the pre-registrations for France 2026.
-Does not depend on the full Sharly Chess app environment — only requires `pyodbc`.
-"""
-
-import calendar
-import locale
-import os
 import re
 import sys
 import zipfile
@@ -16,39 +7,11 @@ from html.parser import HTMLParser
 from pathlib import Path
 from time import time
 from typing import Any, Self
-from urllib.parse import urlsplit
 
 import pyodbc
-import requests
 from pyodbc import Cursor
 
-import csv
-
-DOWNLOAD_DIR: Path = Path(__file__).parent / 'download'
-CSV_DIR: Path = Path(__file__).parent / 'output'
-
-def download_file(
-    url: str,
-    filename: str | None = None,
-) -> Path | None:
-    """Downloads a file from a URL, return the file or None on failure."""
-    DOWNLOAD_DIR.mkdir(exist_ok=True, parents=True)
-    if filename is None:
-        filename = urlsplit(url).path.split('/')[-1]
-    file: Path = DOWNLOAD_DIR / filename
-    print(f'Downloading [{url}]...')
-    r = requests.get(url, stream=True)
-    if not r.ok:
-        print(f'Failed with HTTP code {r.status_code}.')
-        return None
-    print(f'Saving to [{file.name}]...')
-    with open(file, 'wb') as f:
-        for chunk in r.iter_content(chunk_size=1024 * 8):
-            if chunk:
-                f.write(chunk)
-                f.flush()
-                os.fsync(f.fileno())
-    return file
+from ffe.france.download import DOWNLOAD_DIR, download_file
 
 
 @dataclass
@@ -151,12 +114,14 @@ class FFEAccessDatabase(AccessDatabase):
     ):
         super().__init__(DOWNLOAD_DIR / 'Data.mdb' if period is None else Path(__file__).parent / 'archives' / f'Data-{period.year}{period.month:02d}.mdb')
 
-    def get_players(
+    def get_players_by_ffe_id(
         self,
         elo_min: int = 0,
         elo_max: int = 0,
         women_only: bool = False,
         ffe_ids: list[int] = None,
+        federations: list[str] = None,
+        categories: list[str] = None,
     ) -> dict[int, dict[str, Any]]:
         query: str = f"""
 SELECT 
@@ -179,10 +144,11 @@ FROM
     CLUB, JOUEUR
 WHERE 
     CLUB.Ref = JOUEUR.ClubRef 
-    AND (JOUEUR.affType IN ('A') OR JOUEUR.Federation <> 'FRA')
+    {f'AND JOUEUR.Federation IN ({', '.join(map(lambda federation: f'\'{federation}\'', federations))})' if federations else ''}
     {f'AND JOUEUR.Elo >= {elo_min}' if elo_min else ''}
     {f'AND JOUEUR.Elo <= {elo_max}' if elo_max else ''}
     {f'AND JOUEUR.Sexe = \'F\'' if women_only else ''}
+    {f'AND JOUEUR.Federation IN ({', '.join(map(lambda category: f'\'{category}\'', categories))})' if categories else ''}
     {f'AND JOUEUR.Ref IN ({', '.join(str(ffe_id) for ffe_id in ffe_ids)})' if ffe_ids else ''}
 """
         with self:
@@ -192,6 +158,26 @@ WHERE
                 for row in self._fetchall()
             }
         return women
+
+    def get_players(
+        self,
+        elo_min: int = 0,
+        elo_max: int = 0,
+        women_only: bool = False,
+        ffe_ids: list[int] = None,
+        federations: list[str] = None,
+        categories: list[str] = None,
+    ) -> list[dict[str, Any]]:
+        return list(
+            self.get_players_by_ffe_id(
+                elo_min,
+                elo_max,
+                women_only,
+                ffe_ids,
+                federations,
+                categories,
+            ).values()
+        )
 
     def get_player(
         self,
@@ -231,7 +217,8 @@ WHERE
 
 
 class UpToDateFFEAccessDatabase(FFEAccessDatabase):
-    def update_database_if_needed(self):
+    def __init__(self):
+        super().__init__()
         download: bool = False
         if not self.file.exists():
             print('FFE database not found.')
@@ -252,134 +239,6 @@ class UpToDateFFEAccessDatabase(FFEAccessDatabase):
             if not mdb_path.exists():
                 print(f'{mdb_path.name} not found after extraction.')
                 sys.exit(1)
-
-
-@dataclass
-class Over2200Now:
-    def __init__(
-        self,
-    ):
-        self.players_by_ffe_id: dict[int, dict[str, Any]] = {}
-        last_ffe_database: UpToDateFFEAccessDatabase = UpToDateFFEAccessDatabase()
-        print(f'Retrieving players over 2200 actually...')
-        last_ffe_database.update_database_if_needed()
-        for ffe_id, player in last_ffe_database.get_players(elo_min=2200).items():
-            if ffe_id not in self.players_by_ffe_id:
-                self.players_by_ffe_id[ffe_id] = player
-        print(f'{len(self.players_by_ffe_id)} found, these players will be excluded from pre-registration (satisfying Elo >= 2200).')
-
-
-@dataclass
-class PreRegistration:
-    over_2200_now: Over2200Now
-    players_by_ffe_ids: dict[int, dict[str, Any]] = field(init=False, default_factory=dict)
-
-    def add_player(
-        self,
-        player: dict[str, Any],
-    ) -> bool:
-        ffe_id: int = player['ffe_id']
-        player_string: str = f'{player['comment']}: [{player['last_name']} {player['first_name']} {player['rating']}{player['rating_type']} {player['ffe_category']}{player['gender']}]'
-        if ffe_id in self.players_by_ffe_ids:
-            # print(f'{player_string} already pre-registered ({self.players_by_ffe_ids[ffe_id]['comment']}), skipping.')
-            return False
-        if ffe_id in self.over_2200_now.players_by_ffe_id:
-            # print(f'{player_string} now rated [{self.over_2200_now.players_by_ffe_id[ffe_id]['rating']}], skipping.')
-            return False
-        self.players_by_ffe_ids[ffe_id] = player
-        print(player_string)
-        return True
-
-    def export(
-        self,
-        base_name: str,
-    ):
-        CSV_DIR.mkdir(exist_ok=True, parents=True)
-        csv_file: Path = CSV_DIR / f'{base_name}.csv'
-        ffe_database: UpToDateFFEAccessDatabase = UpToDateFFEAccessDatabase()
-        print(f'Updating {len(self.players_by_ffe_ids)} players...')
-        up_to_date_players: dict[int, dict[str, Any]] = ffe_database.get_players(ffe_ids=list(self.players_by_ffe_ids.keys()))
-        print(f'Checking FFE licences...')
-        players: list[dict[str, Any]] = []
-        for player in self.players_by_ffe_ids.values():
-            if up_to_date_player := up_to_date_players.get(player['ffe_id'], None):
-                up_to_date_player['comment'] = player['comment']
-                up_to_date_player['status'] = 'pre_registered'
-                players.append(up_to_date_player)
-            elif up_to_date_player := ffe_database.get_player(player['ffe_id'], check_licence_type=False):
-                print(f'{player['comment']}: [{up_to_date_player['last_name']} {up_to_date_player['first_name']} {up_to_date_player['rating']}{up_to_date_player['rating_type']} {up_to_date_player['ffe_category']}{up_to_date_player['gender']}] not pre-registered (licence type: {up_to_date_player['ffe_licence_type']}).')
-            else:
-                print(f'{player['comment']}: [{player['last_name']} {player['first_name']} {player['rating']}{player['rating_type']} {player['ffe_category']}{player['gender']}] not found in the database.')
-        with open(csv_file, mode='w', newline='', encoding='utf-8') as f:
-            writer = csv.DictWriter(f, fieldnames=list(players[0].keys()))
-            writer.writeheader()
-            writer.writerows(players)
-        print(f'{len(players)} written to [{csv_file.name}], {len(self.players_by_ffe_ids) - len(players)} skipped.')
-
-
-@dataclass
-class Over2200Before:
-    def __init__(
-        self,
-        periods: list[datetime],
-    ):
-        self.periods: list[datetime] = periods
-
-    def pre_registrate_players(
-        self,
-        pre_registration: PreRegistration,
-    ):
-        count: int = 0
-        for period in self.periods:
-            ffe_database: FFEAccessDatabase = FFEAccessDatabase(period)
-            if not ffe_database.file.exists():
-                print(f'No data for {calendar.month_name[period.month]} {period.year} (file {ffe_database.file.name} not found).')
-                continue
-            print(f'Retrieving players over 2200 for {calendar.month_name[period.month]} {period.year}...')
-            players: dict[int, dict[str, Any]] = ffe_database.get_players(elo_min=2200)
-            for ffe_id, player in players.items():
-                player['comment'] = f'Classé{'e' if player['gender'] == 'W' else ''} {player['rating']} en {calendar.month_name[period.month]} {period.year}'
-                if pre_registration.add_player(player):
-                    count += 1
-            print(f'{count} added, {len(players) - count} skipped.')
-
-
-class Women19502199BeforeOrNow:
-    def __init__(
-        self,
-        periods: list[datetime],
-    ):
-        self.periods: list[datetime] = periods
-
-    def pre_registrate_players(
-        self,
-        pre_registration: PreRegistration,
-    ):
-        elo_min: int = 1950
-        elo_max: int = 2199
-        for period in self.periods:
-            ffe_database: FFEAccessDatabase = FFEAccessDatabase(period)
-            if not ffe_database.file.exists():
-                print(f'No data for {calendar.month_name[period.month]} {period.year} (file {ffe_database.file.name} not found).')
-                continue
-            print(f'Retrieving women between {elo_min} and {elo_max} for {period.year}-{period.month}...')
-            count: int = 0
-            women = ffe_database.get_players(elo_min=elo_min, elo_max=elo_max, women_only=True)
-            for ffe_id, woman in women.items():
-                woman['comment'] = f'Classée {woman['rating']} en {calendar.month_name[period.month]} {period.year}'
-                if pre_registration.add_player(woman):
-                    count += 1
-            print(f'{count} added, {len(women) - count} skipped.')
-        last_ffe_database: UpToDateFFEAccessDatabase = UpToDateFFEAccessDatabase()
-        last_ffe_database.update_database_if_needed()
-        print(f'Retrieving women between {elo_min} and {elo_max} actually...')
-        count: int = 0
-        women = last_ffe_database.get_players(elo_min=elo_min, elo_max=elo_max, women_only=True)
-        for ffe_id, woman in women.items():
-            woman['comment'] = f'Joueuse classée {woman['rating']} en {calendar.month_name[datetime.now().month]} {datetime.now().year}'
-            if pre_registration.add_player(woman):
-                count += 1
-        print(f'{count} added, {len(women) - count} skipped.')
 
 
 class FFERankingPageParser(HTMLParser):
@@ -434,14 +293,8 @@ class Tournament(AccessDatabase):
         self.ffe_id: int = ffe_id
         super().__init__(DOWNLOAD_DIR / f'{self.ffe_id}.papi')
         self.name: str = name
-        self.percent: int = percent
-        self.places: int = places
-        assert self.places or self.percent
-
-    def pre_registrate_players(
-        self,
-        pre_registration: PreRegistration,
-    ):
+        self.players: list[dict[str, Any]] = []
+        players_by_name: dict[str, dict[str, Any]] = {}
         if not self.file.exists():
             if not download_file(f'https://www.echecs.asso.fr/Tournois/Id/{self.ffe_id}/{self.ffe_id}.papi'):
                 return
@@ -474,13 +327,14 @@ WHERE
                 for row in self._fetchall()
             }
 
-        places: int = self.places if self.places else int(self.percent / 100 * len(players_by_name))
-
         ranking_filename: str = f'{self.ffe_id}_Cl.html'
         ranking_file: Path = DOWNLOAD_DIR / ranking_filename
         if not ranking_file.exists():
             if not download_file(f'https://www.echecs.asso.fr/Resultats.aspx?URL=Tournois/Id/{self.ffe_id}/{self.ffe_id}&Action=Cl', ranking_filename):
                 return
+
+        if not places:
+            places = int((percent or 100) / 100 * len(players_by_name))
 
         print(f'Retrieving players for tournament [{self.ffe_id} {self.name}]...')
         ranked_player_names: list[str] = FFERankingPageParser(ranking_file).ranked_player_names
@@ -488,30 +342,7 @@ WHERE
         for place, player_name in enumerate(ranked_player_names[:places], start=1):
             player: dict[str, Any] = players_by_name[player_name]
             player['comment'] = f'{self.name} {place}e place'
-            if pre_registration.add_player(player):
-                count += 1
-        print(f'{count} added, {places - count} skipped.')
+            self.players.append(player)
+        print(f'{count} players retrieved.')
 
 
-def main():
-    locale.setlocale(locale.LC_ALL, 'fr_FR.UTF-8')
-    periods: list[datetime] = [
-        datetime(2026, 2, 1),
-        datetime(2026, 3, 1),
-    ]
-    over_2200_now: Over2200Now = Over2200Now()
-    pre_registration: PreRegistration = PreRegistration(over_2200_now)
-    for tournament in (
-            Tournament(67714, 'Accession 2025', percent=50),
-            Tournament(67717, 'Open A 2025', places=10),
-            Tournament(67718, 'Open B 2025', places=1),
-            Tournament(71008, 'FJ U18M 2026', places=1),
-    ):
-        tournament.pre_registrate_players(pre_registration)
-    Over2200Before(periods).pre_registrate_players(pre_registration)
-    Women19502199BeforeOrNow(periods).pre_registrate_players(pre_registration)
-    pre_registration.export(f'accession_pre_registration-{datetime.now().strftime("%Y-%m-%d")}')
-
-
-if __name__ == '__main__':
-    main()
