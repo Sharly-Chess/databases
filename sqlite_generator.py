@@ -8,7 +8,6 @@ from urllib.parse import urlsplit
 import requests
 
 from aes_ecb import AesEcb
-from progress import Progress
 
 
 class SqliteGenerator(ABC):
@@ -61,8 +60,9 @@ class SqliteGenerator(ABC):
         url: str,
         target_dir: Path,
         target_filename: str | None = None,
+        timeout: int = 60,
     ) -> Path:
-        response = requests.get(url, allow_redirects=True, timeout=60)
+        response = requests.get(url, allow_redirects=True, timeout=timeout)
         if response.status_code != 200:
             raise RuntimeError(f'Download failed with HTTP code {response.status_code}')
 
