@@ -120,6 +120,10 @@ class EcfSqliteGenerator(SqliteGenerator):
     def sqlite_player_fide_id_from_csv_value(value: str) -> int:
         return int(value) if value else 0
 
+    @staticmethod
+    def sqlite_player_member_no_from_csv_value(value: str) -> int:
+        return int(value) if value else 0
+
     @classmethod
     def convert_csv_to_sqlite(
         cls,
@@ -139,6 +143,7 @@ class EcfSqliteGenerator(SqliteGenerator):
             """
         CREATE TABLE `player` (
             `id` INTEGER NOT NULL,
+            `ecf_member_no` INTEGER NOT NULL,
             `fide_id` INTEGER,
             `ecf_code` TEXT NOT NULL,
             `last_name` TEXT NOT NULL,
@@ -158,6 +163,7 @@ class EcfSqliteGenerator(SqliteGenerator):
             )
         player_count: int = 0
         fields: list[str] = [
+            'ecf_member_no',
             'fide_id',
             'ecf_code',
             'federation',
@@ -174,6 +180,7 @@ class EcfSqliteGenerator(SqliteGenerator):
         player_query = f"""INSERT INTO `player`({', '.join([f'`{c}`' for c in fields])}) VALUES({', '.join([f':{c}' for c in fields])})"""
         for csv_player in csv_players:
             player: dict[str, Any] = {
+                'ecf_member_no': cls.sqlite_player_member_no_from_csv_value(csv_player['member_no']),
                 'fide_id': cls.sqlite_player_fide_id_from_csv_value(csv_player['FIDE_no']),
                 'ecf_code': csv_player['ECF_code'].strip(),
                 'federation': csv_player['nation'],
