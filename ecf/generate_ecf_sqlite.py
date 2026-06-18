@@ -77,7 +77,7 @@ class EcfSqliteGenerator(SqliteGenerator):
         return csv_players
 
     @staticmethod
-    def sqlite_gender_from_csv_value(value: str) -> str:
+    def sqlite_player_gender_from_csv_value(value: str) -> str:
         match value:
             case 'F' | 'M':
                 return value
@@ -117,6 +117,14 @@ class EcfSqliteGenerator(SqliteGenerator):
         return int(value) if value else 0
 
     @staticmethod
+    def sqlite_player_category_from_csv_value(value: str) -> str:
+        match value:
+            case 'A' | 'K' | 'P' | '':
+                return value
+            case _:
+                raise ValueError(f'Unknown category value: {value}')
+
+    @staticmethod
     def sqlite_player_fide_id_from_csv_value(value: str) -> int:
         return int(value) if value else 0
 
@@ -152,8 +160,11 @@ class EcfSqliteGenerator(SqliteGenerator):
             `gender` TEXT NOT NULL,
             `fide_title` TEXT,
             `standard_rating` INTEGER NOT NULL,
+            `standard_category` TEXT NOT NULL,
             `rapid_rating` INTEGER NOT NULL,
+            `rapid_category` TEXT NOT NULL,
             `blitz_rating` INTEGER NOT NULL,
+            `blitz_category` TEXT NOT NULL,
             `year_of_birth` INTEGER NOT NULL,
             `club` TEXT,
             PRIMARY KEY(`id` AUTOINCREMENT),
@@ -170,8 +181,11 @@ class EcfSqliteGenerator(SqliteGenerator):
             'gender',
             'fide_title',
             'standard_rating',
+            'standard_category',
             'rapid_rating',
+            'rapid_category',
             'blitz_rating',
+            'blitz_category',
             'year_of_birth',
             'club',
             'last_name',
@@ -184,11 +198,14 @@ class EcfSqliteGenerator(SqliteGenerator):
                 'fide_id': cls.sqlite_player_fide_id_from_csv_value(csv_player['FIDE_no']),
                 'ecf_code': csv_player['ECF_code'].strip(),
                 'federation': csv_player['nation'],
-                'gender': cls.sqlite_gender_from_csv_value(csv_player['gender']),
+                'gender': cls.sqlite_player_gender_from_csv_value(csv_player['gender']),
                 'fide_title': cls.sqlite_player_title_from_csv_value(csv_player['title']),
                 'standard_rating': cls.sqlite_player_rating_from_csv_value(csv_player['revised_standard']),
+                'standard_category': cls.sqlite_player_category_from_csv_value(csv_player['standard_revised_category']),
                 'rapid_rating': cls.sqlite_player_rating_from_csv_value(csv_player['revised_rapid']),
+                'rapid_category': cls.sqlite_player_category_from_csv_value(csv_player['rapid_revised_category']),
                 'blitz_rating': cls.sqlite_player_rating_from_csv_value(csv_player['revised_blitz']),
+                'blitz_category': cls.sqlite_player_category_from_csv_value(csv_player['blitz_revised_category']),
                 'year_of_birth': 0,  # no year of birth in the ENG database
                 'club': cls.sqlite_player_club_from_csv_dict(csv_player),
             }
