@@ -182,7 +182,7 @@ class EcfSqliteGenerator(SqliteGenerator):
                 'standard_rating': cls.sqlite_player_rating_from_csv_value(csv_player['revised_standard']),
                 'rapid_rating': cls.sqlite_player_rating_from_csv_value(csv_player['revised_rapid']),
                 'blitz_rating': cls.sqlite_player_rating_from_csv_value(csv_player['revised_blitz']),
-                'year_of_birth': 1900,
+                'year_of_birth': 0,  # no year of birth in the ENG database
                 'club': cls.sqlite_player_club_from_csv_dict(csv_player),
             }
             if ',' in csv_player['full_name']:
