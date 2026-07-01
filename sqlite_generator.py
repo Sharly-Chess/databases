@@ -1,4 +1,5 @@
 import argparse
+import shutil
 import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
@@ -102,10 +103,17 @@ class SqliteGenerator(ABC):
         sqlite_file.parent.mkdir(parents=True, exist_ok=True)
         return connect(database=sqlite_file, detect_types=1, uri=True)
 
-    def run(self):
+    def run(
+        self,
+        save_database: bool = False,
+    ):
         self.parse_arguments()
         with tempfile.TemporaryDirectory() as tmp:
             sqlite_file: Path = self.generate_sqlite_database(Path(tmp))
+            if save_database:
+                save_file: Path = Path(__file__).parent / sqlite_file.name
+                shutil.copy(sqlite_file, save_file)
+                print(f'SQLite database saved to {save_file}.')
             AesEcb.encrypt_file(sqlite_file, self.output_file, self.key)
         print(f'SQLite database encrypted to {self.output_file}.')
 

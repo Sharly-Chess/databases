@@ -110,7 +110,7 @@ class EcfSqliteGenerator(SqliteGenerator):
                 return ''
             case 'XXXX':  # Unknown
                 return ''
-        return d['club_name']
+        return d['club_name'].strip()
 
     @staticmethod
     def sqlite_player_rating_from_csv_value(value: str) -> int:
@@ -248,4 +248,4 @@ class EcfSqliteGenerator(SqliteGenerator):
 
 
 if __name__ == '__main__':
-    EcfSqliteGenerator().run()
+    EcfSqliteGenerator().run(save_database=True)
