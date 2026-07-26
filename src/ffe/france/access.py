@@ -119,9 +119,9 @@ class FFEAccessDatabase(AccessDatabase):
         elo_min: int = 0,
         elo_max: int = 0,
         women_only: bool = False,
-        ffe_ids: list[int] = None,
-        federations: list[str] = None,
-        categories: list[str] = None,
+        ffe_ids: list[int] | None = None,
+        federations: list[str] | None = None,
+        categories: list[str] | None = None,
     ) -> dict[int, dict[str, Any]]:
         query: str = f"""
 SELECT 
@@ -164,9 +164,9 @@ WHERE
         elo_min: int = 0,
         elo_max: int = 0,
         women_only: bool = False,
-        ffe_ids: list[int] = None,
-        federations: list[str] = None,
-        categories: list[str] = None,
+        ffe_ids: list[int] | None = None,
+        federations: list[str] | None = None,
+        categories: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         return list(
             self.get_players_by_ffe_id(

@@ -16,7 +16,7 @@ sys.path.extend(
     map(
         str,
         [
-            Path(__file__).parents[1],  # The root path
+            Path(__file__).parents[1],  # The path to the sources of the application
         ],
     )
 )
@@ -30,6 +30,10 @@ class FideSqliteGenerator(SqliteGenerator):
 
     FIDE_DATABASE_URL = 'https://ratings.fide.com/download/players_list_xml_legacy.zip'
     XML_FILENAME = 'players_list_xml.xml'
+
+    # The FIDE server times out intermittently, so downloads are retried.
+    DOWNLOAD_MAX_ATTEMPTS = 5
+    DOWNLOAD_RETRY_DELAY = 30
 
     @property
     def description(self) -> str:
@@ -159,9 +163,17 @@ class FideSqliteGenerator(SqliteGenerator):
     @classmethod
     def download_xml_file(
         cls,
-        target_dir: Path) -> Path:
-        print(f'Downloading FIDE database from {cls.FIDE_DATABASE_URL}...')
-        zip_path: Path = cls._download_file(cls.FIDE_DATABASE_URL, target_dir)
+        target_dir: Path,
+    ) -> Path:
+        last_publish: int | None = cls._get_github_release_date('fide-latest')
+        print(f'Downloading FIDE database from [{cls.FIDE_DATABASE_URL}]...')
+        zip_path: Path = cls._download_file(
+            cls.FIDE_DATABASE_URL,
+            target_dir,
+            if_modified_since=last_publish,
+            max_attempts=cls.DOWNLOAD_MAX_ATTEMPTS,
+            retry_delay=cls.DOWNLOAD_RETRY_DELAY,
+        )
 
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(target_dir)

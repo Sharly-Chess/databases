@@ -28,7 +28,7 @@ jobs:
       - name: Generate FIDE SQLite database
         env:
           ENC_PASSWORD: ${{ secrets.FIDE_DATABASE_ENC_PASSWORD }}
-        run: python fide/generate_fide_sqlite.py --key="$ENC_PASSWORD"
+        run: python src/fide/generate_fide_sqlite.py --key="$ENC_PASSWORD"
 
       - name: Publish to GitHub Release
         env:

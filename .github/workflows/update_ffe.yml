@@ -28,7 +28,7 @@ jobs:
       - name: Generate FFE SQLite database
         env:
           ENC_PASSWORD: ${{ secrets.FFE_DATABASE_ENC_PASSWORD }}
-        run: python ffe/generate_ffe_sqlite.py --key="$ENC_PASSWORD"
+        run: python src/ffe/generate_ffe_sqlite.py --key="$ENC_PASSWORD"
 
       - name: Zip database with password
         env:
@@ -40,21 +40,11 @@ jobs:
       - name: Publish to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # Continue for a while to publish to tag latest, used by 4.0.5 clients
-        # TODO only keep ffe-latest in future releases
-        # TODO only keep encrypted file in future releases (remove zip file)
         run: |
           ENC_DB_FILENAME=$(python -c "from ffe.generate_ffe_sqlite import FfeSqliteGenerator as sqlite_generator; print(sqlite_generator().output_file)")
-          ZIP_FILENAME="${ENC_DB_FILENAME%.enc}.zip"
-          TAG="latest"
-          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ZIP_FILENAME" \
-            --title "FFE Database" \
-            --notes "Auto-updated daily" \
-            --latest=false
           TAG="ffe-latest"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ZIP_FILENAME" "$ENC_DB_FILENAME" \
+          gh release create "$TAG" "$ENC_DB_FILENAME" \
             --title "FFE Database" \
             --notes "Auto-updated daily" \
             --latest=false

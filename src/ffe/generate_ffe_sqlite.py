@@ -24,7 +24,7 @@ sys.path.extend(
     map(
         str,
         [
-            Path(__file__).parents[1],  # The root path
+            Path(__file__).parents[1],  # The path to the sources of the application
         ],
     )
 )
@@ -59,9 +59,9 @@ class FFEPageParser(HTMLParser):
         elif tag == 'input':
             id_ = attrs_dict.get('id', '')
             if id_ == '__VIEWSTATE':
-                self.viewstate = attrs_dict.get('value', '')
+                self.viewstate = attrs_dict.get('value', '') or ''
             elif id_ == '__VIEWSTATEGENERATOR':
-                self.viewstate_generator = attrs_dict.get('value', '')
+                self.viewstate_generator = attrs_dict.get('value', '') or ''
         elif tag == 'img':
             src = attrs_dict.get('src', '').lower()
             if src == 'images/t_fleche_d.gif':
@@ -88,6 +88,8 @@ class FfeSqliteGenerator(SqliteGenerator):
     FFE_DATABASE_URL = 'https://www.echecs.asso.fr/Papi/PapiData.zip'
     FFE_PUBLIC_URL = 'http://echecs.asso.fr'
     MDB_FILENAME = 'Data.mdb'
+
+    DOWNLOAD_MAX_ATTEMPTS = 3
 
     FFE_LEAGUES = [
         'ARA',
@@ -140,8 +142,8 @@ class FfeSqliteGenerator(SqliteGenerator):
         self,
         tmp_dir: Path,
     ) -> Path:
-        papi_converter: Path = self.download_papi_converter(tmp_dir)
         mdb_path: Path = self.download_ffe_mdb(tmp_dir)
+        papi_converter: Path = self.download_papi_converter(tmp_dir)
         return self.convert_mdb_to_sqlite(papi_converter, mdb_path)
 
     @staticmethod
@@ -189,7 +191,7 @@ class FfeSqliteGenerator(SqliteGenerator):
             f'https://github.com/Sharly-Chess/papi-converter/releases/download'
             f'/v{cls.PAPI_CONVERTER_VERSION}/{archive_filename}'
         )
-        print(f'Downloading papi-converter from {url}...')
+        print(f'Downloading papi-converter from [{url}]...')
         archive_path: Path = cls._download_file(url, install_dir)
 
         if archive_filename.endswith('.tar.gz'):
@@ -212,8 +214,14 @@ class FfeSqliteGenerator(SqliteGenerator):
         cls,
         target_dir: Path,
     ) -> Path:
-        print(f'Downloading FFE database from {cls.FFE_DATABASE_URL}...')
-        zip_path: Path = cls._download_file(cls.FFE_DATABASE_URL, target_dir)
+        last_publish: int | None = cls._get_github_release_date('ffe-latest')
+        print(f'Downloading FFE database from [{cls.FFE_DATABASE_URL}]...')
+        zip_path: Path = cls._download_file(
+            cls.FFE_DATABASE_URL,
+            target_dir,
+            if_modified_since=last_publish,
+            max_attempts=cls.DOWNLOAD_MAX_ATTEMPTS,
+        )
 
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(target_dir)

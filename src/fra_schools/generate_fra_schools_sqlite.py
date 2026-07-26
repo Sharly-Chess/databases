@@ -17,7 +17,7 @@ sys.path.extend(
     map(
         str,
         [
-            Path(__file__).parents[1],  # The root path
+            Path(__file__).parents[1],  # The path to the sources of the application
         ],
     )
 )
@@ -27,6 +27,8 @@ from sqlite_generator import SqliteGenerator
 
 
 class FraSchoolsSqliteGenerator(SqliteGenerator):
+
+    DOWNLOAD_MAX_ATTEMPTS = 3
 
     @property
     def description(self) -> str:
@@ -90,8 +92,13 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
             )
         )
 
-        print(f'Downloading data from [{url}].')
-        return cls._download_file(url, source_file_dir, 'schools.json')
+        print(f'Downloading FRA Schools from [{url}]...')
+        return cls._download_file(
+            url,
+            source_file_dir,
+            target_filename='schools.json',
+            max_attempts=cls.DOWNLOAD_MAX_ATTEMPTS,
+        )
 
     @classmethod
     def convert_json_to_sqlite(
