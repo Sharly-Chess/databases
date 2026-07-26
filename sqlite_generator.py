@@ -1,4 +1,5 @@
 import argparse
+import os
 import tempfile
 import time
 from abc import ABC, abstractmethod
@@ -10,6 +11,14 @@ import requests
 
 from aes_ecb import AesEcb
 from progress import Progress
+
+
+class DownloadUnavailable(RuntimeError):
+    """The source could not be reached (timeout/connection error) after retries.
+
+    Raised so the workflow can treat a transient outage as "no update this run"
+    rather than a hard failure — FIDE intermittently drops CI runner IPs.
+    """
 
 
 class SqliteGenerator(ABC):
@@ -60,6 +69,13 @@ class SqliteGenerator(ABC):
     # The FIDE server times out intermittently, so downloads are retried.
     DOWNLOAD_MAX_ATTEMPTS = 5
     DOWNLOAD_RETRY_DELAY = 30  # seconds, doubled after each failed attempt
+    # Sent as a precaution: some servers reject the default python-requests
+    # User-Agent. Not the cause of the observed connect timeouts (those happen
+    # before any request is sent), just harmless defensive hygiene.
+    DOWNLOAD_USER_AGENT = (
+        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 '
+        '(KHTML, like Gecko) Chrome/125.0 Safari/537.36'
+    )
 
     @classmethod
     def _download_file(
@@ -68,15 +84,27 @@ class SqliteGenerator(ABC):
         target_dir: Path,
         target_filename: str | None = None,
     ) -> Path:
+        # FIDE blocks GitHub-hosted (Azure) runner IPs at the firewall, so an
+        # egress proxy can be supplied via the standard HTTPS_PROXY/HTTP_PROXY
+        # env vars (honoured automatically) or DOWNLOAD_PROXY for an explicit one.
+        proxy = os.environ.get('DOWNLOAD_PROXY')
+        proxies = {'http': proxy, 'https': proxy} if proxy else None
+        headers = {'User-Agent': cls.DOWNLOAD_USER_AGENT}
         response = None
         delay = cls.DOWNLOAD_RETRY_DELAY
         for attempt in range(1, cls.DOWNLOAD_MAX_ATTEMPTS + 1):
             try:
-                response = requests.get(url, allow_redirects=True, timeout=(60, 300))
+                response = requests.get(
+                    url,
+                    allow_redirects=True,
+                    timeout=(60, 300),
+                    headers=headers,
+                    proxies=proxies,
+                )
                 break
             except requests.exceptions.RequestException as error:
                 if attempt == cls.DOWNLOAD_MAX_ATTEMPTS:
-                    raise RuntimeError(
+                    raise DownloadUnavailable(
                         f'Download failed after {cls.DOWNLOAD_MAX_ATTEMPTS} attempts: {error}'
                     ) from error
                 print(f'Download attempt {attempt} failed ({error}); retrying in {delay}s...')
@@ -125,7 +153,11 @@ class SqliteGenerator(ABC):
     def run(self):
         self.parse_arguments()
         with tempfile.TemporaryDirectory() as tmp:
-            sqlite_file: Path = self.generate_sqlite_database(Path(tmp))
+            try:
+                sqlite_file: Path = self.generate_sqlite_database(Path(tmp))
+            except DownloadUnavailable as error:
+                print(f'::warning::Source unavailable, skipping update this run: {error}')
+                return
             AesEcb.encrypt_file(sqlite_file, self.output_file, self.key)
         print(f'SQLite database encrypted to {self.output_file}.')
 

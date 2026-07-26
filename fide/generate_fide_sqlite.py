@@ -23,7 +23,7 @@ sys.path.extend(
 
 from aes_ecb import AesEcb
 from progress import Progress
-from sqlite_generator import SqliteGenerator
+from sqlite_generator import DownloadUnavailable, SqliteGenerator
 
 
 class FideSqliteGenerator(SqliteGenerator):
@@ -67,7 +67,11 @@ class FideSqliteGenerator(SqliteGenerator):
         with tempfile.TemporaryDirectory() as tmp:
             tmp_dir = Path(tmp)
             # The XML is downloaded and parsed only once, for the current schema.
-            sqlite_file: Path = self.generate_sqlite_database(tmp_dir)
+            try:
+                sqlite_file: Path = self.generate_sqlite_database(tmp_dir)
+            except DownloadUnavailable as error:
+                print(f'::warning::Source unavailable, skipping update this run: {error}')
+                return
             AesEcb.encrypt_file(sqlite_file, self.output_file, self.key)
             print(f'SQLite database encrypted to {self.output_file}.')
             # Every legacy version is derived from it with a plain SQL copy.
