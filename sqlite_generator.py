@@ -1,5 +1,6 @@
 import argparse
 import tempfile
+import time
 from abc import ABC, abstractmethod
 from pathlib import Path
 from sqlite3 import Connection, connect
@@ -56,13 +57,32 @@ class SqliteGenerator(ABC):
             self.output_file: Path = args.output.resolve()
         self.key: str = args.key
 
-    @staticmethod
+    # The FIDE server times out intermittently, so downloads are retried.
+    DOWNLOAD_MAX_ATTEMPTS = 5
+    DOWNLOAD_RETRY_DELAY = 30  # seconds, doubled after each failed attempt
+
+    @classmethod
     def _download_file(
+        cls,
         url: str,
         target_dir: Path,
         target_filename: str | None = None,
     ) -> Path:
-        response = requests.get(url, allow_redirects=True, timeout=60)
+        response = None
+        delay = cls.DOWNLOAD_RETRY_DELAY
+        for attempt in range(1, cls.DOWNLOAD_MAX_ATTEMPTS + 1):
+            try:
+                response = requests.get(url, allow_redirects=True, timeout=(60, 300))
+                break
+            except requests.exceptions.RequestException as error:
+                if attempt == cls.DOWNLOAD_MAX_ATTEMPTS:
+                    raise RuntimeError(
+                        f'Download failed after {cls.DOWNLOAD_MAX_ATTEMPTS} attempts: {error}'
+                    ) from error
+                print(f'Download attempt {attempt} failed ({error}); retrying in {delay}s...')
+                time.sleep(delay)
+                delay *= 2
+
         if response.status_code != 200:
             raise RuntimeError(f'Download failed with HTTP code {response.status_code}')
 
