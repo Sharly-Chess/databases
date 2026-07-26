@@ -22,8 +22,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests
-          pip install cryptography
+          pip install -e .
 
       - name: Generate FRA Schools SQLite database
         env:
