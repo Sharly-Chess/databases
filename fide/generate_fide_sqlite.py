@@ -5,6 +5,7 @@ Does not depend on the full Sharly Chess app environment — only requires `requ
 """
 
 import sys
+import tempfile
 import zipfile
 from pathlib import Path
 from sqlite3 import Connection, Cursor
@@ -20,6 +21,7 @@ sys.path.extend(
     )
 )
 
+from aes_ecb import AesEcb
 from progress import Progress
 from sqlite_generator import SqliteGenerator
 
@@ -35,11 +37,48 @@ class FideSqliteGenerator(SqliteGenerator):
 
     @property
     def version(self) -> int:
-        return 1
+        return 2
 
     @property
     def default_output_filename(self) -> str:
         return f'fide_players_v{self.version}.enc'
+
+    @property
+    def legacy_versions(self) -> list[int]:
+        # Older clients look the database up by its versioned filename, so for
+        # each version listed here we publish a file with that schema, derived
+        # from the current database. Add an entry (and a builder in
+        # `_legacy_builders`) whenever the schema changes.
+        return [1]
+
+    def output_file_for_version(self, version: int) -> Path:
+        # Sits next to the current output (default or --output), only the
+        # version in the filename differs.
+        return self.output_file.with_name(f'fide_players_v{version}.enc')
+
+    @property
+    def _legacy_builders(self) -> dict[int, Callable[[Path, Path], Path]]:
+        return {
+            1: self.build_v1_database,
+        }
+
+    def run(self):
+        self.parse_arguments()
+        with tempfile.TemporaryDirectory() as tmp:
+            tmp_dir = Path(tmp)
+            # The XML is downloaded and parsed only once, for the current schema.
+            sqlite_file: Path = self.generate_sqlite_database(tmp_dir)
+            AesEcb.encrypt_file(sqlite_file, self.output_file, self.key)
+            print(f'SQLite database encrypted to {self.output_file}.')
+            # Every legacy version is derived from it with a plain SQL copy.
+            for version in self.legacy_versions:
+                builder = self._legacy_builders.get(version)
+                if builder is None:
+                    raise ValueError(f'No legacy database builder for version {version}')
+                legacy_file: Path = builder(sqlite_file, tmp_dir)
+                legacy_output: Path = self.output_file_for_version(version)
+                AesEcb.encrypt_file(legacy_file, legacy_output, self.key)
+                print(f'Legacy (v{version}) database encrypted to {legacy_output}.')
 
     @classmethod
     def generate_sqlite_database(
@@ -48,6 +87,70 @@ class FideSqliteGenerator(SqliteGenerator):
     ) -> Path:
         xml_path: Path = cls.download_xml_file(tmp_dir)
         return cls.convert_xml_to_sqlite(xml_path)
+
+    @classmethod
+    def build_v1_database(
+        cls,
+        sqlite_file: Path,
+        tmp_dir: Path,
+    ) -> Path:
+        """Build the v1 database (no `fide_women_title` column) from the current one.
+
+        In the v1 schema `fide_title` held the raw FIDE `<title>` value, i.e. the
+        open title when present, otherwise the women's title. That is reconstructed
+        here from the two split columns, so no second download/parse is needed.
+        """
+        print('Deriving legacy (v1) database...')
+        legacy_file: Path = tmp_dir / 'players_list_xml_v1.db'
+        database: Connection = cls._create_sqlite_database(legacy_file)
+        database.execute(f"ATTACH DATABASE '{sqlite_file}' AS current")
+        database.execute(
+            """
+        CREATE TABLE `player` (
+            `id` INTEGER NOT NULL,
+            `fide_id` INTEGER NOT NULL,
+            `last_name` TEXT NOT NULL,
+            `first_name` TEXT,
+            `federation` TEXT NOT NULL,
+            `gender` TEXT NOT NULL,
+            `fide_title` TEXT,
+            `standard_rating` INTEGER NOT NULL,
+            `rapid_rating` INTEGER NOT NULL,
+            `blitz_rating` INTEGER NOT NULL,
+            `year_of_birth` INTEGER NOT NULL,
+            `k_standard` INTEGER NOT NULL,
+            `k_rapid` INTEGER NOT NULL,
+            `k_blitz` INTEGER NOT NULL,
+            `fide_arbiter_title` TEXT NOT NULL,
+            PRIMARY KEY(`id` AUTOINCREMENT),
+            UNIQUE(`fide_id`)
+        )
+        """
+        )
+        database.execute(
+            """
+        INSERT INTO `player` (
+            `id`, `fide_id`, `last_name`, `first_name`, `federation`, `gender`,
+            `fide_title`, `standard_rating`, `rapid_rating`, `blitz_rating`,
+            `year_of_birth`, `k_standard`, `k_rapid`, `k_blitz`, `fide_arbiter_title`
+        )
+        SELECT
+            `id`, `fide_id`, `last_name`, `first_name`, `federation`, `gender`,
+            CASE WHEN `fide_title` != '' THEN `fide_title` ELSE `fide_women_title` END,
+            `standard_rating`, `rapid_rating`, `blitz_rating`,
+            `year_of_birth`, `k_standard`, `k_rapid`, `k_blitz`, `fide_arbiter_title`
+        FROM `current`.`player`
+        """
+        )
+        database.execute('CREATE INDEX IF NOT EXISTS `player_first_name` ON `player` (`first_name` COLLATE NOCASE)')
+        database.execute('CREATE INDEX IF NOT EXISTS `player_last_name` ON `player` (`last_name` COLLATE NOCASE)')
+        database.execute('CREATE INDEX IF NOT EXISTS `player_fide_id` ON `player` (`fide_id`)')
+        database.commit()
+        database.close()
+
+        size_mb = legacy_file.stat().st_size / 1_048_576
+        print(f'Legacy (v1) database built ({size_mb:.1f} MB)')
+        return legacy_file
 
     @classmethod
     def download_xml_file(
@@ -74,10 +177,25 @@ class FideSqliteGenerator(SqliteGenerator):
                 raise ValueError(f'Unknown value: {value}')
 
     @staticmethod
-    def sqlite_player_title_from_xml_value(value: str) -> str:
+    def sqlite_open_title_from_xml_value(value: str) -> str:
+        # The FIDE `<title>` field holds the player's highest title, which may be
+        # a women's title. Women's titles are stored separately (see w_title), so
+        # here we only keep genuine open titles and drop women's ones.
+        value = value.upper()
         match value:
-            case '' | 'WCM' | 'CM' | 'WFM' | 'FM' | 'WIM' | 'IM' | 'WGM' | 'GM':
-                return value.upper()
+            case '' | 'CM' | 'FM' | 'IM' | 'GM':
+                return value
+            case 'WCM' | 'WFM' | 'WIM' | 'WGM':
+                return ''
+            case _:
+                raise ValueError(f'Unknown value: {value}')
+
+    @staticmethod
+    def sqlite_women_title_from_xml_value(value: str) -> str:
+        value = value.upper()
+        match value:
+            case '' | 'WCM' | 'WFM' | 'WIM' | 'WGM':
+                return value
             case _:
                 raise ValueError(f'Unknown value: {value}')
 
@@ -117,6 +235,7 @@ class FideSqliteGenerator(SqliteGenerator):
             `federation` TEXT NOT NULL,
             `gender` TEXT NOT NULL,
             `fide_title` TEXT,
+            `fide_women_title` TEXT,
             `standard_rating` INTEGER NOT NULL,
             `rapid_rating` INTEGER NOT NULL,
             `blitz_rating` INTEGER NOT NULL,
@@ -135,7 +254,8 @@ class FideSqliteGenerator(SqliteGenerator):
             'name': ('name', None),
             'country': ('federation', lambda s: s.upper()),
             'sex': ('gender', cls.sqlite_gender_from_xml_value),
-            'title': ('fide_title', cls.sqlite_player_title_from_xml_value),
+            'title': ('fide_title', cls.sqlite_open_title_from_xml_value),
+            'w_title': ('fide_women_title', cls.sqlite_women_title_from_xml_value),
             'o_title': ('fide_arbiter_title', cls.sqlite_arbiter_title_from_xml_value),
             'rating': ('standard_rating', int),
             'rapid_rating': ('rapid_rating', int),
