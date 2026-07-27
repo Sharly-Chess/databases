@@ -7,11 +7,10 @@ Does not depend on the full Sharly Chess app environment — only requires `requ
 import json
 import re
 import sys
-import urllib
 from pathlib import Path
 from sqlite3 import Connection, Cursor
 from typing import Callable, Any
-from urllib.parse import urlsplit
+from urllib.parse import urlencode
 
 sys.path.extend(
     map(
@@ -28,7 +27,9 @@ from sqlite_generator import SqliteGenerator
 
 class FraSchoolsSqliteGenerator(SqliteGenerator):
 
-    DOWNLOAD_MAX_ATTEMPTS = 3
+    def __init__(self):
+        super().__init__()
+        self.download_max_attempts = 3
 
     @property
     def description(self) -> str:
@@ -42,17 +43,15 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
     def default_output_filename(self) -> str:
         return f'fra_schools_v{self.version}.enc'
 
-    @classmethod
     def generate_sqlite_database(
-        cls,
+        self,
         tmp_dir: Path,
     ) -> Path:
-        json_path: Path = cls.download_json_file(tmp_dir)
-        return cls.convert_json_to_sqlite(json_path)
+        json_path: Path = self.download_json_file(tmp_dir)
+        return self.convert_json_to_sqlite(json_path)
 
-    @classmethod
     def download_json_file(
-        cls,
+        self,
         source_file_dir: Path,
     ) -> Path:
         types: list[str] = ['Ecole', 'Collège', 'Lycée']
@@ -61,7 +60,7 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
         url: str = (
             base_url
             + '?'
-            + urllib.parse.urlencode(
+            + urlencode(
                 {
                     'select': ','.join(
                         [
@@ -93,11 +92,11 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
         )
 
         print(f'Downloading FRA Schools from [{url}]...')
-        return cls._download_file(
+        return self._download_file(
             url,
             source_file_dir,
             target_filename='schools.json',
-            max_attempts=cls.DOWNLOAD_MAX_ATTEMPTS,
+            max_attempts=self.download_max_attempts,
         )
 
     @classmethod

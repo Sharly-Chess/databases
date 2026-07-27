@@ -28,12 +28,14 @@ from sqlite_generator import DownloadUnavailable, SqliteGenerator
 
 class FideSqliteGenerator(SqliteGenerator):
 
-    FIDE_DATABASE_URL = 'https://ratings.fide.com/download/players_list_xml_legacy.zip'
-    XML_FILENAME = 'players_list_xml.xml'
+    def __init__(self):
+        super().__init__()
+        self.fide_database_url: str = 'https://ratings.fide.com/download/players_list_xml_legacy.zip'
+        self.xml_filename = 'players_list_xml.xml'
 
-    # The FIDE server times out intermittently, so downloads are retried.
-    DOWNLOAD_MAX_ATTEMPTS = 5
-    DOWNLOAD_RETRY_DELAY = 30
+        # The FIDE server times out intermittently, so downloads are retried.
+        self.download_max_attempts = 20
+        self.download_retry_delay = 30
 
     @property
     def description(self) -> str:
@@ -88,13 +90,12 @@ class FideSqliteGenerator(SqliteGenerator):
                 AesEcb.encrypt_file(legacy_file, legacy_output, self.key)
                 print(f'Legacy (v{version}) database encrypted to {legacy_output}.')
 
-    @classmethod
     def generate_sqlite_database(
-        cls,
+        self,
         tmp_dir: Path,
     ) -> Path:
-        xml_path: Path = cls.download_xml_file(tmp_dir)
-        return cls.convert_xml_to_sqlite(xml_path)
+        xml_path: Path = self.download_xml_file(tmp_dir)
+        return self.convert_xml_to_sqlite(xml_path)
 
     @classmethod
     def build_v1_database(
@@ -160,28 +161,28 @@ class FideSqliteGenerator(SqliteGenerator):
         print(f'Legacy (v1) database built ({size_mb:.1f} MB)')
         return legacy_file
 
-    @classmethod
     def download_xml_file(
-        cls,
+        self,
         target_dir: Path,
     ) -> Path:
-        last_publish: int | None = cls._get_github_release_date('fide-latest')
-        print(f'Downloading FIDE database from [{cls.FIDE_DATABASE_URL}]...')
-        zip_path: Path = cls._download_file(
-            cls.FIDE_DATABASE_URL,
+        last_publish: int | None = self._get_github_release_date('fide-latest')
+        print(f'Downloading FIDE database from [{self.fide_database_url}]...')
+        zip_path: Path = self._download_file(
+            self.fide_database_url,
             target_dir,
             if_modified_since=last_publish,
-            max_attempts=cls.DOWNLOAD_MAX_ATTEMPTS,
-            retry_delay=cls.DOWNLOAD_RETRY_DELAY,
+            max_attempts=self.download_max_attempts,
+            retry_delay=self.download_retry_delay,
+            anonymize=True,
         )
 
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(target_dir)
         zip_path.unlink()
 
-        xml_path = target_dir / cls.XML_FILENAME
+        xml_path = target_dir / self.xml_filename
         if not xml_path.exists():
-            raise RuntimeError(f'{cls.XML_FILENAME} not found after extraction')
+            raise RuntimeError(f'{self.xml_filename} not found after extraction')
         return xml_path
 
     @staticmethod

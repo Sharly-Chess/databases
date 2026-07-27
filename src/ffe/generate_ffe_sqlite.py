@@ -84,43 +84,42 @@ class FFEPageParser(HTMLParser):
 
 class FfeSqliteGenerator(SqliteGenerator):
 
-    PAPI_CONVERTER_VERSION = '1.4.0'
-    FFE_DATABASE_URL = 'https://www.echecs.asso.fr/Papi/PapiData.zip'
-    FFE_PUBLIC_URL = 'http://echecs.asso.fr'
-    MDB_FILENAME = 'Data.mdb'
-
-    DOWNLOAD_MAX_ATTEMPTS = 3
-
-    FFE_LEAGUES = [
-        'ARA',
-        'BFC',
-        'BRE',
-        'CRS',
-        'CVL',
-        'EST',
-        'GUA',
-        'GUY',
-        'HDF',
-        'IDF',
-        'MAR',
-        'NAQ',
-        'NCA',
-        'NOR',
-        'OCC',
-        'PAC',
-        'PDL',
-        'POL',
-        'REU',
-    ]
-
-    ARBITER_TITLE_FROM_HTML = {
-        'Arbitre Jeune': 'AFJ',
-        'Arbitre Club': 'AFC',
-        'Arbitre Open 1': 'AFO1',
-        'Arbitre Open 2': 'AFO2',
-        'Arbitre Elite 1': 'AFE1',
-        'Arbitre Elite 2': 'AFE2',
-    }
+    def __init__(self):
+        super().__init__()
+        self.papi_converter_version: str = '1.4.0'
+        self.ffe_database_url: str = 'https://www.echecs.asso.fr/Papi/PapiData.zip'
+        self.ffe_public_url: str = 'http://echecs.asso.fr'
+        self.mdb_filename: str = 'Data.mdb'
+        self.download_max_attempts = 3
+        self.ffe_leagues: list[str] = [
+            'ARA',
+            'BFC',
+            'BRE',
+            'CRS',
+            'CVL',
+            'EST',
+            'GUA',
+            'GUY',
+            'HDF',
+            'IDF',
+            'MAR',
+            'NAQ',
+            'NCA',
+            'NOR',
+            'OCC',
+            'PAC',
+            'PDL',
+            'POL',
+            'REU',
+        ]
+        self.arbiter_title_from_html = {
+            'Arbitre Jeune': 'AFJ',
+            'Arbitre Club': 'AFC',
+            'Arbitre Open 1': 'AFO1',
+            'Arbitre Open 2': 'AFO2',
+            'Arbitre Elite 1': 'AFE1',
+            'Arbitre Elite 2': 'AFE2',
+        }
 
     @property
     def description(self) -> str:
@@ -177,22 +176,21 @@ class FfeSqliteGenerator(SqliteGenerator):
             case _:
                 raise NotImplementedError(f'Unsupported platform: {sys.platform}')
 
-    @classmethod
     def download_papi_converter(
-        cls,
+        self,
         install_dir: Path,
     ) -> Path:
-        archive_filename, executable_subdir, executable_filename = cls.get_papi_converter_info()
+        archive_filename, executable_subdir, executable_filename = self.get_papi_converter_info()
         executable_path = install_dir / executable_subdir / executable_filename
         if executable_path.exists():
             return executable_path
 
         url = (
             f'https://github.com/Sharly-Chess/papi-converter/releases/download'
-            f'/v{cls.PAPI_CONVERTER_VERSION}/{archive_filename}'
+            f'/v{self.papi_converter_version}/{archive_filename}'
         )
         print(f'Downloading papi-converter from [{url}]...')
-        archive_path: Path = cls._download_file(url, install_dir)
+        archive_path: Path = self._download_file(url, install_dir)
 
         if archive_filename.endswith('.tar.gz'):
             with tarfile.open(archive_path, 'r:gz') as tar:
@@ -209,27 +207,26 @@ class FfeSqliteGenerator(SqliteGenerator):
 
         return executable_path
 
-    @classmethod
     def download_ffe_mdb(
-        cls,
+        self,
         target_dir: Path,
     ) -> Path:
-        last_publish: int | None = cls._get_github_release_date('ffe-latest')
-        print(f'Downloading FFE database from [{cls.FFE_DATABASE_URL}]...')
-        zip_path: Path = cls._download_file(
-            cls.FFE_DATABASE_URL,
+        last_publish: int | None = self._get_github_release_date('ffe-latest')
+        print(f'Downloading FFE database from [{self.ffe_database_url}]...')
+        zip_path: Path = self._download_file(
+            self.ffe_database_url,
             target_dir,
             if_modified_since=last_publish,
-            max_attempts=cls.DOWNLOAD_MAX_ATTEMPTS,
+            max_attempts=self.download_max_attempts,
         )
 
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(target_dir)
         zip_path.unlink()
 
-        mdb_path = target_dir / cls.MDB_FILENAME
+        mdb_path = target_dir / self.mdb_filename
         if not mdb_path.exists():
-            raise RuntimeError(f'{cls.MDB_FILENAME} not found after extraction')
+            raise RuntimeError(f'{self.mdb_filename} not found after extraction')
         return mdb_path
 
     def convert_mdb_to_sqlite(
@@ -285,14 +282,13 @@ class FfeSqliteGenerator(SqliteGenerator):
     def _validate_ffe_licence(s: str) -> bool:
         return bool(re.match(r'^[A-Z]\d{5}$', s))
 
-    @classmethod
-    def scrape_ffe_arbiters(cls) -> dict[str, str]:
+    def scrape_ffe_arbiters(self) -> dict[str, str]:
         """Returns {ffe_licence_number: arbiter_title_string} for all leagues."""
         print('Scraping FFE arbiter titles...')
         session = requests.Session()
 
         # Initialise — gets initial viewstate cookies
-        html = session.get(cls.FFE_PUBLIC_URL, timeout=30).text
+        html = session.get(self.ffe_public_url, timeout=30).text
         p = FFEPageParser()
         p.feed(html)
         viewstate = p.viewstate
@@ -300,9 +296,9 @@ class FfeSqliteGenerator(SqliteGenerator):
 
         arbiters: dict[str, str] = {}
 
-        progress: Progress = Progress(len(cls.FFE_LEAGUES), delay=1)
-        for index, league in enumerate(cls.FFE_LEAGUES, start=1):
-            url = f'{cls.FFE_PUBLIC_URL}/ListeArbitres.aspx?Action=DNALIGUE&Ligue={league}'
+        progress: Progress = Progress(len(self.ffe_leagues), delay=1)
+        for index, league in enumerate(self.ffe_leagues, start=1):
+            url = f'{self.ffe_public_url}/ListeArbitres.aspx?Action=DNALIGUE&Ligue={league}'
             page = 1
             while True:
                 if page == 1:
@@ -328,8 +324,8 @@ class FfeSqliteGenerator(SqliteGenerator):
                     viewstate_generator = p.viewstate_generator
 
                 for row in p.rows:
-                    if len(row) >= 3 and cls._validate_ffe_licence(row[0]):
-                        title = cls.ARBITER_TITLE_FROM_HTML.get(row[2], '')
+                    if len(row) >= 3 and self._validate_ffe_licence(row[0]):
+                        title = self.arbiter_title_from_html.get(row[2], '')
                         if title:
                             arbiters[row[0]] = title
 
