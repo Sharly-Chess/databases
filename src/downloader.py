@@ -4,7 +4,7 @@ import time
 from abc import ABC
 from http import HTTPMethod
 from pathlib import Path
-from random import randrange
+from random import randrange, shuffle
 from typing import Literal
 from urllib.parse import urlparse, urlsplit
 
@@ -101,7 +101,9 @@ class Downloader(ABC):
         scheme: str,
     ) -> list[str]:
         """Returns a list of proxies for a given scheme."""
-        return self.__get_geonode_proxy_list_for_scheme(scheme) + self.__get_ip_locate_proxy_list_for_scheme(scheme)
+        proxies: list[str] = self.__get_geonode_proxy_list_for_scheme(scheme) + self.__get_ip_locate_proxy_list_for_scheme(scheme)
+        shuffle(proxies)
+        return proxies
 
     def _get_proxy_config_for_scheme(
         self,
@@ -193,6 +195,9 @@ class Downloader(ABC):
                         print(f'Download attempt {attempt} failed ({error}); retrying in {retry_delay}s...')
                         time.sleep(retry_delay)
                         retry_delay *= 2
+                else:
+                    print(f'Download attempt {attempt} failed ({error}).')
+
         raise DownloadUnavailable(f'Download failed after {max_attempts} attempts.')
 
     def _download_file(
