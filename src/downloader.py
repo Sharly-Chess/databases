@@ -4,6 +4,7 @@ import time
 from abc import ABC
 from http import HTTPMethod
 from pathlib import Path
+from random import randrange
 from typing import Literal
 from urllib.parse import urlparse, urlsplit
 
@@ -63,6 +64,7 @@ class Downloader(ABC):
             response: Response = self._get_url_response(
                 proxies_url,
                 method=HTTPMethod.GET,
+                silent=True,
             )
         except DownloadUnavailable as error:
             raise ProxyUnavailable(f'Could not get the proxies list: {error}.')
@@ -74,12 +76,13 @@ class Downloader(ABC):
         scheme: str,
     ) -> list[str]:
         """Returns a list of proxies for a given scheme based on https://geonode.com/free-proxy-list."""
-        proxies_url: str = f'https://proxylist.geonode.com/api/proxy-list?protocols={scheme}&speed=fast&page=1&limit=500&sort_by=latency&sort_type=desc'
+        proxies_url: str = f'https://proxylist.geonode.com/api/proxy-list?protocols={scheme}&speed=fast&page=1&limit=500&sort_by=responseTime&sort_type=asc'
         print(f'Downloading proxies from [{proxies_url}]...')
         try:
             response: Response = self._get_url_response(
                 proxies_url,
                 method=HTTPMethod.GET,
+                silent=True,
             )
         except DownloadUnavailable as error:
             raise ProxyUnavailable(f'Could not get the proxies list: {error}.')
@@ -125,9 +128,10 @@ class Downloader(ABC):
                 print(f'{len(self.possible_proxies_per_scheme[scheme])} proxies read.')
 
             possible_proxies: list[str] = self.possible_proxies_per_scheme[scheme]
+            first: int = randrange(len(possible_proxies))
             # print(f'Testing proxies (from #{first})...')
             for num in range(len(possible_proxies)):
-                proxy: str = possible_proxies[num]
+                proxy: str = possible_proxies[(num + first) % len(possible_proxies)]
                 try:
                     test_url: str = f'{scheme}://api.iplocate.io/ip'
                     #print(f'Testing proxy [{proxy}] on URL [{test_url}]...')
