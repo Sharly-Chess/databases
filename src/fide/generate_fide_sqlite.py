@@ -34,7 +34,7 @@ class FideSqliteGenerator(SqliteGenerator):
         self.xml_filename = 'players_list_xml.xml'
 
         # The FIDE server times out intermittently, so downloads are retried.
-        self.download_max_attempts = 20
+        self.download_max_attempts = 50
         self.download_retry_delay = 30
 
     @property
