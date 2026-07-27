@@ -76,7 +76,7 @@ class Downloader(ABC):
         scheme: str,
     ) -> list[str]:
         """Returns a list of proxies for a given scheme based on https://geonode.com/free-proxy-list."""
-        proxies_url: str = f'https://proxylist.geonode.com/api/proxy-list?protocols={scheme}&speed=fast&page=1&limit=500&sort_by=responseTime&sort_type=asc'
+        proxies_url: str = f'https://proxylist.geonode.com/api/proxy-list?protocols={scheme}&page=1&limit=500&sort_by=responseTime&sort_type=asc'
         print(f'Downloading proxies from [{proxies_url}]...')
         try:
             response: Response = self._get_url_response(
@@ -101,7 +101,7 @@ class Downloader(ABC):
         scheme: str,
     ) -> list[str]:
         """Returns a list of proxies for a given scheme."""
-        return self.__get_ip_locate_proxy_list_for_scheme(scheme) + self.__get_geonode_proxy_list_for_scheme(scheme)
+        return self.__get_geonode_proxy_list_for_scheme(scheme) + self.__get_ip_locate_proxy_list_for_scheme(scheme)
 
     def _get_proxy_config_for_scheme(
         self,
