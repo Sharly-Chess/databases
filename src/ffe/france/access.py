@@ -147,7 +147,7 @@ WHERE
     {f'AND JOUEUR.Federation IN ({', '.join(map(lambda federation: f'\'{federation}\'', federations))})' if federations else ''}
     {f'AND JOUEUR.Elo >= {elo_min}' if elo_min else ''}
     {f'AND JOUEUR.Elo <= {elo_max}' if elo_max else ''}
-    {f'AND JOUEUR.Sexe = \'F\'' if women_only else ''}
+    {'AND JOUEUR.Sexe = \'F\'' if women_only else ''}
     {f'AND JOUEUR.Federation IN ({', '.join(map(lambda category: f'\'{category}\'', categories))})' if categories else ''}
     {f'AND JOUEUR.Ref IN ({', '.join(str(ffe_id) for ffe_id in ffe_ids)})' if ffe_ids else ''}
 """
@@ -298,7 +298,7 @@ class Tournament(AccessDatabase):
         if not self.file.exists():
             if not download_file(f'https://www.echecs.asso.fr/Tournois/Id/{self.ffe_id}/{self.ffe_id}.papi'):
                 return
-        query: str = f"""
+        query: str = """
 SELECT 
     JOUEUR.FideTitre AS title,
     JOUEUR.Prenom AS first_name,
