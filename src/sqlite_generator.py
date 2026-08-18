@@ -136,7 +136,8 @@ class SqliteGenerator(Downloader, ABC):
         suffix: str,
     ):
         filename: str = f'{self.marker_prefix}-{self.start_date}-{suffix}'
-        Path(filename).touch()
+        with open(Path(filename), "w") as file:
+            file.write(suffix)
         print(f'Created marker file {filename}.')
 
     @property
