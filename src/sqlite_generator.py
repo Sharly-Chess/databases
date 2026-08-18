@@ -1,5 +1,7 @@
 import argparse
+import glob
 import json
+import re
 import tempfile
 from abc import ABC, abstractmethod
 from datetime import datetime
@@ -9,7 +11,12 @@ from sqlite3 import Connection, connect
 from typing import Any
 
 from aes_ecb import AesEcb
-from downloader import Downloader, DownloadUnavailable, SourceDataUnchanged
+from downloader import (
+    Downloader,
+    DownloadUnavailable,
+    SourceDataUnchanged,
+    ProxyUnavailable,
+)
 
 
 class SqliteGenerator(Downloader, ABC):
@@ -17,6 +24,7 @@ class SqliteGenerator(Downloader, ABC):
 
     def __init__(self):
         super().__init__()
+        self.start_date: str = datetime.now().strftime('%Y-%m-%d-%H-%M')
         self.output_file: Path = Path(self.default_output_filename)
         self.key: str = ''
         self.force_update: bool = False
@@ -47,7 +55,6 @@ class SqliteGenerator(Downloader, ABC):
             help='Force the update even when data is up to date',
         )
         parser.add_argument(
-            '-k',
             '--key',
             type=str,
             required=True,
@@ -103,20 +110,66 @@ class SqliteGenerator(Downloader, ABC):
         sqlite_file.parent.mkdir(parents=True, exist_ok=True)
         return connect(database=sqlite_file, detect_types=1, uri=True)
 
+    @property
+    @abstractmethod
+    def marker_prefix(self):
+        """Returns the prefix to use for marker files."""
+
+    @staticmethod
+    def _markers() -> list[Path]:
+        return [
+            Path(filename)
+            for filename in sorted(
+                filename
+                for filename in glob.glob('*')
+                if re.match(r'^.*-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-.+', filename) and Path(filename).is_file()
+            )
+        ]
+
+    def delete_markers(self):
+        for marker in self._markers():
+            marker.unlink()
+            print(f'Deleted previous marker file [{marker.name}].')
+
+    def create_marker(
+        self,
+        suffix: str,
+    ):
+        filename: str = f'{self.marker_prefix}-{self.start_date}-{suffix}'
+        Path(filename).touch()
+        print(f'Created marker file {filename}.')
+
+    @property
+    def last_marker_filename(
+        self,
+    ) -> str:
+        try:
+            return self._markers()[-1].name
+        except IndexError:
+            return f'{self.marker_prefix}-{self.start_date}-no-marker'
+
     def run(self):
+        self.delete_markers()
         self.parse_arguments()
         with tempfile.TemporaryDirectory() as tmp:
             try:
                 sqlite_file: Path = self.generate_sqlite_database(Path(tmp))
             except DownloadUnavailable as error:
                 print(f'::warning::Source unavailable, skipping update this run: {error}')
+                self.create_marker('download-failed')
                 return
             except SourceDataUnchanged:
+                self.create_marker('source-unavailable')
+                print('Source data unchanged, skipping update this run.')
+                return
+            except ProxyUnavailable:
+                self.create_marker('proxy-unavailable')
                 print('Source data unchanged, skipping update this run.')
                 return
             AesEcb.encrypt_file(sqlite_file, self.output_file, self.key)
             print(f'SQLite database encrypted to {self.output_file}.')
             self.post_run(sqlite_file)
+            self.create_marker('update')
 
     @abstractmethod
     def generate_sqlite_database(

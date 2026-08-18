@@ -45,6 +45,10 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
     def default_output_filename(self) -> str:
         return f'fra_schools_v{self.version}.enc'
 
+    @property
+    def marker_prefix(self):
+        return 'fra-schools'
+
     def generate_sqlite_database(
         self,
         tmp_dir: Path,

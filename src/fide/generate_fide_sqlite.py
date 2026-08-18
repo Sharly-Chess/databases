@@ -69,6 +69,10 @@ class FideSqliteGenerator(SqliteGenerator):
             1: self.build_v1_database,
         }
 
+    @property
+    def marker_prefix(self):
+        return 'fide'
+
     def generate_sqlite_database(
         self,
         tmp_dir: Path,

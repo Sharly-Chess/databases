@@ -139,6 +139,10 @@ class FfeSqliteGenerator(SqliteGenerator):
     def db_file(self) -> Path:
         return self.output_file.with_suffix('.db')
 
+    @property
+    def marker_prefix(self):
+        return 'ffe'
+
     def generate_sqlite_database(
         self,
         tmp_dir: Path,
