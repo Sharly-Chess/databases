@@ -79,12 +79,13 @@ class SqliteGenerator(Downloader, ABC):
         except json.JSONDecodeError as error:
             print(f'Invalid response from GitHub: {error}.')
             return None
-        date_field: str = 'created_at'
-        release_date: str = data.get(date_field, '')
-        if not release_date:
-            print(f'Field [{date_field}] not found.')
-            print(json.dumps(data, sort_keys=True, indent=4))
-            return None
+        update_field: str = 'updated_at'
+        if not (release_date := data.get(update_field, '')):
+            create_field: str = 'created_at'
+            if not (release_date := data.get(create_field, '')):
+                print(f'Fields [{update_field}] and [{create_field}] not found.')
+                print(json.dumps(data, sort_keys=True, indent=4))
+                return None
         try:
             print(f'Date of [{tag}] on GitHub is [{release_date}].')
             return int(datetime.fromisoformat(release_date).timestamp())
