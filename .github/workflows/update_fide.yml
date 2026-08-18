@@ -33,7 +33,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MARKER=$(python -c "from fide.generate_fide_sqlite import FideSqliteGenerator as g; s=g(); print(s.last_marker_filename")
+          MARKER=$(python -c "from fide.generate_fide_sqlite import FideSqliteGenerator as g; s=g(); print(s.last_marker_filename)")
           FILES=$(python -c "from fide.generate_fide_sqlite import FideSqliteGenerator as g; s=g(); print(s.output_file, *[s.output_file_for_version(v) for v in s.legacy_versions])")
           TAG="fide-latest"
           # The generator soft-exits (no files) when FIDE is unreachable; keep the
