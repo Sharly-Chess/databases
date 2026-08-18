@@ -81,7 +81,9 @@ class Downloader(ABC):
             print(f'::warning:: Could not get [{proxies_url}]: {error}.')
             return []
         content: str = response.content.decode()
-        return content.splitlines()
+        proxy_list: list[str] = content.splitlines()
+        print(f'Downloaded {len(proxy_list)} proxies.\n{'\n'.join(f'- {proxy}' for proxy in proxy_list)}')
+        return proxy_list
 
     def __get_geonode_proxy_list_for_scheme(
         self,
@@ -105,10 +107,12 @@ class Downloader(ABC):
             data: dict[str, list[dict[str, str]]] = json.loads(content)
         except json.JSONDecodeError as error:
             raise ProxyUnavailable(f'Invalid response: {error}.')
-        return [
+        proxy_list: list[str] = [
             f'{line['ip']}:{line['port']}'
             for line in data['data']
         ]
+        print(f'Downloaded {len(proxy_list)} proxies.\n{'\n'.join(f'- {proxy}' for proxy in proxy_list)}')
+        return proxy_list
 
     def _get_proxy_list_for_scheme(
         self,
@@ -215,7 +219,7 @@ class Downloader(ABC):
                 )
             if attempt > request_max_attempts:
                 raise DownloadUnavailable(
-                    f'Download failed after {max_attempts} attempts.'
+                    f'Download failed after {request_max_attempts} attempts.'
                 )
             try:
                 function = get if method == HTTPMethod.GET else head
