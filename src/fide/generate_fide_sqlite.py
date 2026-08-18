@@ -5,7 +5,6 @@ Does not depend on the full Sharly Chess app environment — only requires `requ
 """
 
 import sys
-import tempfile
 import zipfile
 from pathlib import Path
 from sqlite3 import Connection, Cursor
@@ -25,7 +24,7 @@ sys.path.extend(
 
 from aes_ecb import AesEcb
 from progress import Progress
-from sqlite_generator import DownloadUnavailable, SqliteGenerator
+from sqlite_generator import SqliteGenerator
 
 
 class FideSqliteGenerator(SqliteGenerator):
@@ -65,32 +64,10 @@ class FideSqliteGenerator(SqliteGenerator):
         return self.output_file.with_name(f'fide_players_v{version}.enc')
 
     @property
-    def _legacy_builders(self) -> dict[int, Callable[[Path, Path], Path]]:
+    def _legacy_builders(self) -> dict[int, Callable[[Path], Path]]:
         return {
             1: self.build_v1_database,
         }
-
-    def run(self):
-        self.parse_arguments()
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_dir = Path(tmp)
-            # The XML is downloaded and parsed only once, for the current schema.
-            try:
-                sqlite_file: Path = self.generate_sqlite_database(tmp_dir)
-            except DownloadUnavailable as error:
-                print(f'::warning::Source unavailable, skipping update this run: {error}')
-                return
-            AesEcb.encrypt_file(sqlite_file, self.output_file, self.key)
-            print(f'SQLite database encrypted to {self.output_file}.')
-            # Every legacy version is derived from it with a plain SQL copy.
-            for version in self.legacy_versions:
-                builder = self._legacy_builders.get(version)
-                if builder is None:
-                    raise ValueError(f'No legacy database builder for version {version}')
-                legacy_file: Path = builder(sqlite_file, tmp_dir)
-                legacy_output: Path = self.output_file_for_version(version)
-                AesEcb.encrypt_file(legacy_file, legacy_output, self.key)
-                print(f'Legacy (v{version}) database encrypted to {legacy_output}.')
 
     def generate_sqlite_database(
         self,
@@ -99,11 +76,24 @@ class FideSqliteGenerator(SqliteGenerator):
         xml_path: Path = self.download_xml_file(tmp_dir)
         return self.convert_xml_to_sqlite(xml_path)
 
+    def post_run(
+        self,
+        sqlite_file: Path,
+    ):
+        # Every legacy version is derived from it with a plain SQL copy.
+        for version in self.legacy_versions:
+            builder = self._legacy_builders.get(version)
+            if builder is None:
+                raise ValueError(f'No legacy database builder for version {version}')
+            legacy_file: Path = builder(sqlite_file)
+            legacy_output: Path = self.output_file_for_version(version)
+            AesEcb.encrypt_file(legacy_file, legacy_output, self.key)
+            print(f'Legacy (v{version}) database encrypted to {legacy_output}.')
+
     @classmethod
     def build_v1_database(
         cls,
         sqlite_file: Path,
-        tmp_dir: Path,
     ) -> Path:
         """Build the v1 database (no `fide_women_title` column) from the current one.
 
@@ -112,6 +102,7 @@ class FideSqliteGenerator(SqliteGenerator):
         here from the two split columns, so no second download/parse is needed.
         """
         print('Deriving legacy (v1) database...')
+        tmp_dir: Path = sqlite_file.parent
         legacy_file: Path = tmp_dir / 'players_list_xml_v1.db'
         database: Connection = cls._create_sqlite_database(legacy_file)
         database.execute(f"ATTACH DATABASE '{sqlite_file}' AS current")

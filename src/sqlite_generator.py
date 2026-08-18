@@ -19,6 +19,7 @@ class SqliteGenerator(Downloader, ABC):
         super().__init__()
         self.output_file: Path = Path(self.default_output_filename)
         self.key: str = ''
+        self.force_update: bool = False
 
     @property
     @abstractmethod
@@ -41,10 +42,9 @@ class SqliteGenerator(Downloader, ABC):
     ):
         parser = argparse.ArgumentParser(description=self.description)
         parser.add_argument(
-            '--output',
-            type=Path,
-            required=False,
-            help='Path for the output SQLite encrypted file',
+            '--force-update',
+            action='store_true',
+            help='Force the update even when data is up to date',
         )
         parser.add_argument(
             '-k',
@@ -54,15 +54,16 @@ class SqliteGenerator(Downloader, ABC):
             help='Key used for AES-CBC encryption',
         )
         args = parser.parse_args()
-        if args.output:
-            self.output_file: Path = args.output.resolve()
-        self.key: str = args.key
+        self.key = args.key
+        self.force_update = args.force_update
 
     def _get_github_release_date(
         self,
         tag: str,
     ) -> int | None:
         """Get the timestamp of a GH databases release, or None on failure or if not found."""
+        if self.force_update:
+            return None
         url: str = f'https://api.github.com/repos/sharly-chess/databases/releases/tags/{tag}'
         print(f'Reading date of release [{tag}] from [{url}]...')
         try:
@@ -114,7 +115,8 @@ class SqliteGenerator(Downloader, ABC):
                 print('Source data unchanged, skipping update this run.')
                 return
             AesEcb.encrypt_file(sqlite_file, self.output_file, self.key)
-        print(f'SQLite database encrypted to {self.output_file}.')
+            print(f'SQLite database encrypted to {self.output_file}.')
+            self.post_run(sqlite_file)
 
     @abstractmethod
     def generate_sqlite_database(
@@ -123,3 +125,10 @@ class SqliteGenerator(Downloader, ABC):
     ) -> Path:
         """Generates the SQL database file.
         Returns the path of the generated database or None if source data were unchanged."""
+
+    def post_run(
+        self,
+        sqlite_file: Path,
+    ):
+        """Perform post operations, such as deriving old databases from the actual SQLite file."""
+        pass
