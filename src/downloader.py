@@ -177,10 +177,10 @@ class Downloader(ABC):
         self,
         scheme: str,
         proxy_mode: ProxyMode,
-    ) -> int | None:
+    ) -> int:
         """Returns the maximum number of proxies for the scheme (will cap the number of download attempts)."""
         proxies: dict[str, str] | None = self._get_proxy_config_for_scheme(scheme, proxy_mode, renew_proxy=False)
-        return len(proxies) if proxies is not None else None
+        return len(proxies) if proxies is not None else 0
 
     def _get_url_response(
         self,
@@ -202,13 +202,17 @@ class Downloader(ABC):
         scheme: str = urlparse(url).scheme
         retry_delay = retry_delay or self.default_retry_delay
         attempt: int = 1
+        print(f'{max_attempts=}')
         while True:
             request_max_attempts = max_attempts or self.default_max_attempts
-            if proxies_count := self._get_proxies_count_for_scheme(scheme, proxy_mode) is not None:
+            proxies_count: int = self._get_proxies_count_for_scheme(scheme, proxy_mode)
+            print(f'{proxies_count=}')
+            if proxies_count:
                 request_max_attempts = min(
                     request_max_attempts,
                     proxies_count,
                 )
+            print(f'{request_max_attempts=}')
             if attempt > request_max_attempts:
                 raise DownloadUnavailable(
                     f'Download failed after {max_attempts} attempts.'
@@ -236,7 +240,7 @@ class Downloader(ABC):
                             print(f'Download attempt #{attempt} failed ({error}); retrying using another proxy...')
                     attempt += 1
                 else:
-                    print(f'Download attempt #{attempt} failed ({error}).')
+                    print(f'Download attempt #{attempt} failed ({error}), aborting.')
 
     def _download_file(
         self,
