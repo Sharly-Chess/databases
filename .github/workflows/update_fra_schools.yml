@@ -27,7 +27,7 @@ jobs:
       - name: Generate FRA Schools SQLite database
         env:
           ENC_PASSWORD: ${{ secrets.FRA_SCHOOLS_DATABASE_ENC_PASSWORD }}
-        run: python src/fra_schools/generate_fra_schools_sqlite.py --key="$ENC_PASSWORD"
+        run: python -u src/fra_schools/generate_fra_schools_sqlite.py --key="$ENC_PASSWORD"
 
       - name: Publish to GitHub Release
         env:
