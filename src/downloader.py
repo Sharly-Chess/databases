@@ -5,8 +5,8 @@ from abc import ABC
 from enum import StrEnum, auto
 from http import HTTPMethod
 from pathlib import Path
-from random import randrange, shuffle
-from typing import Literal
+from random import shuffle
+from typing import Literal, Callable
 from urllib.parse import urlparse, urlsplit
 
 from httpdate import httpdate_to_unixtime, unixtime_to_httpdate
@@ -33,7 +33,7 @@ class ProxyUnavailable(RuntimeError):
 class ProxyMode(StrEnum):
     # Never use a proxy, only direct connections
     NEVER = auto()
-    # Use a proxy after a failure occured
+    # Use a proxy after a failure occurred
     AFTER_FAILURE = auto()
     # Always use a proxy (no direct connection)
     ALWAYS = auto()
@@ -61,67 +61,115 @@ class Downloader(ABC):
         # the free proxies downloaded from various sites, for each scheme
         self.possible_proxies_per_scheme: dict[str, list[str]] = {}
         # the proxy to use, for each scheme
-        self.proxy_per_scheme: dict[str, str] = {}
+        self.working_proxy_per_scheme: dict[str, str] = {}
 
-    def __get_ip_locate_proxy_list_for_scheme(
-        self,
-        scheme: str,
+    @staticmethod
+    def __ip_locate_content_to_proxies(
+        decoded_content: str,
     ) -> list[str]:
-        """Returns a list of proxies for a given scheme based on iplocate."""
-        proxies_url: str = f'https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/{scheme}.txt'
-        print(f'Downloading proxies from [{proxies_url}]...')
-        try:
-            response, _ = self._get_url_response(
-                proxies_url,
-                method=HTTPMethod.GET,
-                silent=True,
-                max_attempts=1,
-            )
-        except DownloadUnavailable as error:
-            print(f'::warning:: Could not get [{proxies_url}]: {error}.')
-            return []
-        content: str = response.content.decode()
-        proxy_list: list[str] = content.splitlines()
-        print(f'Downloaded {len(proxy_list)} proxies.\n{'\n'.join(f'- {proxy}' for proxy in proxy_list)}')
-        return proxy_list
+        return decoded_content.splitlines()
 
-    def __get_geonode_proxy_list_for_scheme(
-        self,
-        scheme: str,
+    @staticmethod
+    def __geonode_content_to_proxies(
+        decoded_content: str,
     ) -> list[str]:
-        """Returns a list of proxies for a given scheme based on https://geonode.com/free-proxy-list."""
-        proxies_url: str = f'https://proxylist.geonode.com/api/proxy-list?protocols={scheme}&page=1&limit=500&sort_by=responseTime&sort_type=asc'
-        print(f'Downloading proxies from [{proxies_url}]...')
         try:
-            response, _ = self._get_url_response(
-                proxies_url,
-                method=HTTPMethod.GET,
-                silent=True,
-                max_attempts=1,
-            )
-        except DownloadUnavailable as error:
-            print(f'::warning:: Could not get [{proxies_url}]: {error}.')
-            return []
-        content: str = response.content.decode()
-        try:
-            data: dict[str, list[dict[str, str]]] = json.loads(content)
+            data: dict[str, list[dict[str, str]]] = json.loads(decoded_content)
         except json.JSONDecodeError as error:
             raise ProxyUnavailable(f'Invalid response: {error}.')
-        proxy_list: list[str] = [
+        return [
             f'{line['ip']}:{line['port']}'
             for line in data['data']
         ]
-        print(f'Downloaded {len(proxy_list)} proxies.\n{'\n'.join(f'- {proxy}' for proxy in proxy_list)}')
-        return proxy_list
 
-    def _get_proxy_list_for_scheme(
+    @staticmethod
+    def __proxyfly_content_to_proxies(
+        decoded_content: str,
+    ) -> list[str]:
+        return [
+            line.replace('http://', '')
+            for line in decoded_content.splitlines()
+        ]
+
+    def __site_content_to_proxies(
+        self,
+        url: str,
+        transformation: Callable[[str], list[str]],
+    ) -> list[str]:
+        """Returns a list of proxies for a given URL and a content tranformation method."""
+        print(f'Downloading proxies from [{url}]...')
+        try:
+            response, _ = self._get_url_response(
+                url,
+                method=HTTPMethod.GET,
+                silent=True,
+                max_attempts=1,
+            )
+        except DownloadUnavailable as error:
+            print(f'::warning:: Could not get [{url}]: {error}.')
+            return []
+        if response.status_code != 200:
+            print(
+                f'::warning::Error {response.status_code} while downloading.'
+            )
+            return []
+        content: str = response.content.decode()
+        proxies: list[str] = transformation(content)
+        print(f'Downloaded {len(proxies)} proxies.\n{'\n'.join(f'- {proxy}' for proxy in proxies[:5])}{'\n- ...' if len(proxies) > 5 else ''}')
+        return proxies
+
+    def _load_possible_proxies_for_scheme(
         self,
         scheme: str,
-    ) -> list[str]:
-        """Returns a list of proxies for a given scheme."""
-        proxies: list[str] = self.__get_geonode_proxy_list_for_scheme(scheme) + self.__get_ip_locate_proxy_list_for_scheme(scheme)
-        shuffle(proxies)
-        return proxies
+    ):
+        """Loads all the possible proxies for a given scheme."""
+        if scheme in self.possible_proxies_per_scheme:
+            # load only once
+            return
+        self.possible_proxies_per_scheme[scheme] = []
+        for url, transformation in (
+                (
+                    f'https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/{scheme}.txt',
+                    self.__ip_locate_content_to_proxies,
+                ),
+                (
+                    f'https://proxylist.geonode.com/api/proxy-list?protocols={scheme}&page=1&limit=500&sort_by=responseTime&sort_type=asc',
+                    self.__geonode_content_to_proxies,
+                ),
+                (
+                    f'https://cdn.jsdelivr.net/gh/proxifly/free-proxy-list@main/proxies/protocols/{scheme}/data.txt',
+                    self.__proxyfly_content_to_proxies,
+                ),
+            ):
+            self.possible_proxies_per_scheme[scheme] += self.__site_content_to_proxies(url, transformation)
+        if not self.possible_proxies_per_scheme[scheme]:
+            raise ProxyUnavailable('No proxy downloaded.')
+        shuffle(self.possible_proxies_per_scheme[scheme])
+
+    def _get_working_proxy_for_scheme(
+        self,
+        scheme: str,
+        renew: bool = False,
+    ) -> str:
+        """Return a proxy successfully tested against a common site."""
+        self._load_possible_proxies_for_scheme(scheme)
+        if renew and scheme in self.working_proxy_per_scheme:
+            del self.working_proxy_per_scheme[scheme]
+        while self.possible_proxies_per_scheme[scheme]:
+            self.working_proxy_per_scheme[scheme] = self.possible_proxies_per_scheme[scheme].pop(0)
+            try:
+                test_url: str = f'{scheme}://google.fr'
+                print(f'Testing proxy [{self.working_proxy_per_scheme[scheme]}] on URL [{test_url}]...')
+                self._get_url_response(
+                    test_url,
+                    method=HTTPMethod.GET,
+                    silent=True,
+                )
+                print(f'Set proxy [{self.working_proxy_per_scheme[scheme]}] for scheme [{scheme}].')
+                return self.working_proxy_per_scheme[scheme]
+            except DownloadUnavailable as error:
+                print(f'Proxy [{self.working_proxy_per_scheme[scheme]}] failed: {error}.')
+        raise ProxyUnavailable('No proxy available.')
 
     def _get_proxy_config_for_scheme(
         self,
@@ -140,54 +188,9 @@ class Downloader(ABC):
             }
 
         # if env var is not supplied, then use a random free proxy
-        if renew_proxy or scheme not in self.proxy_per_scheme:
-            if scheme in self.proxy_per_scheme:
-                del self.proxy_per_scheme[scheme]
-
-            if scheme not in self.possible_proxies_per_scheme:
-                # download the list of possible proxies only once
-                print(f'No proxy configured for scheme [{scheme}].')
-                self.possible_proxies_per_scheme[scheme] = self._get_proxy_list_for_scheme(scheme)
-                if not self.possible_proxies_per_scheme[scheme]:
-                    raise ProxyUnavailable('Proxies list is empty.')
-                print(f'{len(self.possible_proxies_per_scheme[scheme])} proxies read.')
-
-            possible_proxies: list[str] = self.possible_proxies_per_scheme[scheme]
-            first: int = randrange(len(possible_proxies))
-            # print(f'Testing proxies (from #{first})...')
-            for num in range(len(possible_proxies)):
-                proxy: str = possible_proxies[(num + first) % len(possible_proxies)]
-                try:
-                    test_url: str = f'{scheme}://api.iplocate.io/ip'
-                    #print(f'Testing proxy [{proxy}] on URL [{test_url}]...')
-                    self._get_url_response(
-                        test_url,
-                        method=HTTPMethod.GET,
-                        silent=True,
-                    )
-                    self.proxy_per_scheme[scheme] = proxy
-                    print(f'Set proxy [{proxy}] for scheme [{scheme}].')
-                    break
-                except DownloadUnavailable as error:
-                    print(f'Proxy #{proxy} [{proxy}] failed: {error}.')
-                    pass
-            if not self.proxy_per_scheme[scheme]:
-                raise ProxyUnavailable('All the proxies tested failed.')
         return {
-            scheme: self.proxy_per_scheme[scheme],
+            scheme: self._get_working_proxy_for_scheme(scheme, renew_proxy),
         }
-
-    def _get_proxies_count_for_scheme(
-        self,
-        scheme: str,
-        proxy_mode: ProxyMode,
-    ) -> int:
-        """Returns the maximum number of proxies for the scheme (will cap the number of download attempts)."""
-        proxy_config_by_scheme: dict[str, str] | None = self._get_proxy_config_for_scheme(scheme, proxy_mode, renew_proxy=False)
-        if proxy_config_by_scheme and scheme in proxy_config_by_scheme:
-            return len(proxy_config_by_scheme[scheme])
-        else:
-            return 0
 
     def _get_url_response(
         self,
@@ -208,15 +211,9 @@ class Downloader(ABC):
                 print('Downloading information...')
         scheme: str = urlparse(url).scheme
         retry_delay = retry_delay or self.default_retry_delay
+        max_attempts = max_attempts or self.default_max_attempts
         attempt: int = 1
-        while True:
-            request_max_attempts = max_attempts or self.default_max_attempts
-            proxies_count: int = self._get_proxies_count_for_scheme(scheme, proxy_mode)
-            if proxies_count:
-                request_max_attempts = min(
-                    request_max_attempts,
-                    proxies_count,
-                )
+        for attempt in range(1, max_attempts + 1):
             try:
                 function = get if method == HTTPMethod.GET else head
                 return function(
@@ -227,22 +224,22 @@ class Downloader(ABC):
                     proxies=self._get_proxy_config_for_scheme(scheme, proxy_mode, renew_proxy=attempt > 1),
                 ), proxy_mode
             except RequestException as error:
-                if attempt > request_max_attempts:
+                if attempt == max_attempts:
                     print(f'Download attempt #{attempt} failed ({error}), aborting.')
-                    break
-                match proxy_mode:
-                    case ProxyMode.NEVER:
-                        print(f'Download attempt #{attempt} failed ({error}); retrying in {retry_delay}s...')
-                        time.sleep(retry_delay)
-                        retry_delay *= 2
-                    case ProxyMode.AFTER_FAILURE:
-                        proxy_mode = ProxyMode.ALWAYS
-                        print(f'Download attempt #{attempt} failed ({error}); retrying using a proxy...')
-                    case ProxyMode.ALWAYS:
-                        print(f'Download attempt #{attempt} failed ({error}); retrying using another proxy...')
-                attempt += 1
+                else:
+                    match proxy_mode:
+                        case ProxyMode.NEVER:
+                            print(f'Download attempt #{attempt} failed ({error}); retrying in {retry_delay}s...')
+                            time.sleep(retry_delay)
+                            retry_delay *= 2
+                        case ProxyMode.AFTER_FAILURE:
+                            proxy_mode = ProxyMode.ALWAYS
+                            print(f'Download attempt #{attempt} failed ({error}); retrying using a proxy...')
+                        case ProxyMode.ALWAYS:
+                            print(f'Download attempt #{attempt} failed ({error}); retrying using another proxy...')
+                    attempt += 1
         raise DownloadUnavailable(
-            f'Download failed after {request_max_attempts} attempts.'
+            f'Download failed after {max_attempts} attempts.'
         )
 
     def _download_file(

@@ -12,6 +12,8 @@ from sqlite3 import Connection, Cursor
 from typing import Callable, Any
 from urllib.parse import urlencode
 
+from downloader import ProxyMode
+
 sys.path.extend(
     map(
         str,
@@ -97,6 +99,7 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
             source_file_dir,
             target_filename='schools.json',
             max_attempts=self.download_max_attempts,
+            proxy_mode=ProxyMode.NEVER,
         )
 
     @classmethod

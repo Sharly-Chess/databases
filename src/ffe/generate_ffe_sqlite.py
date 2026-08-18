@@ -20,6 +20,8 @@ from sqlite3 import Connection, Cursor
 
 import requests
 
+from downloader import ProxyMode
+
 sys.path.extend(
     map(
         str,
@@ -218,6 +220,7 @@ class FfeSqliteGenerator(SqliteGenerator):
             target_dir,
             if_modified_since=last_publish,
             max_attempts=self.download_max_attempts,
+            proxy_mode=ProxyMode.NEVER,
         )
 
         with zipfile.ZipFile(zip_path, 'r') as zf:
