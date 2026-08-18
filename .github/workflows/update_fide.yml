@@ -45,7 +45,7 @@ jobs:
                 echo "::warning::No marker found."
                 touch "$MARKER"
               fi
-              gh release update "$TAG" $MARKER
+              gh release upload "$TAG" $MARKER
               exit 0
             fi
           done
@@ -58,4 +58,4 @@ jobs:
             echo "::warning::No marker found."
             touch "$MARKER"
           fi
-          gh release update "$TAG" $MARKER
+          gh release upload "$TAG" $MARKER
