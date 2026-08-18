@@ -230,12 +230,13 @@ class Downloader(ABC):
                             time.sleep(retry_delay)
                             retry_delay *= 2
                         case ProxyMode.AFTER_FAILURE:
-                            proxy_mode = ProxyMode.AFTER_FAILURE
+                            proxy_mode = ProxyMode.ALWAYS
                             print(f'Download attempt #{attempt} failed ({error}); retrying using a proxy...')
                         case ProxyMode.ALWAYS:
                             print(f'Download attempt #{attempt} failed ({error}); retrying using another proxy...')
+                    attempt += 1
                 else:
-                    print(f'Download attempt {attempt} failed ({error}).')
+                    print(f'Download attempt #{attempt} failed ({error}).')
 
     def _download_file(
         self,
