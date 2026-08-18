@@ -83,6 +83,7 @@ class SqliteGenerator(Downloader, ABC):
         release_date: str = data.get(date_field, '')
         if not release_date:
             print(f'Field [{date_field}] not found.')
+            print(json.dumps(data, sort_keys=True, indent=4))
             return None
         try:
             print(f'Date of [{tag}] on GitHub is [{release_date}].')
