@@ -12,6 +12,8 @@ from sqlite3 import Connection, Cursor
 from typing import Callable, Any
 from xml.etree import ElementTree
 
+from downloader import ProxyMode
+
 sys.path.extend(
     map(
         str,
@@ -173,7 +175,7 @@ class FideSqliteGenerator(SqliteGenerator):
             if_modified_since=last_publish,
             max_attempts=self.download_max_attempts,
             retry_delay=self.download_retry_delay,
-            anonymize=True,
+            proxy_mode=ProxyMode.AFTER_FAILURE,
         )
 
         with zipfile.ZipFile(zip_path, 'r') as zf:

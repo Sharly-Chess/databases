@@ -2,6 +2,7 @@ import json
 import os
 import time
 from abc import ABC
+from enum import StrEnum, auto
 from http import HTTPMethod
 from pathlib import Path
 from random import randrange, shuffle
@@ -27,6 +28,15 @@ class SourceDataUnchanged(RuntimeError):
 
 class ProxyUnavailable(RuntimeError):
     """No proxy available."""
+
+
+class ProxyMode(StrEnum):
+    # Never use a proxy, only direct connections
+    NEVER = auto()
+    # Use a proxy after a failure occured
+    AFTER_FAILURE = auto()
+    # Always use a proxy (no direct connection)
+    ALWAYS = auto()
 
 
 class Downloader(ABC):
@@ -61,13 +71,15 @@ class Downloader(ABC):
         proxies_url: str = f'https://raw.githubusercontent.com/iplocate/free-proxy-list/refs/heads/main/protocols/{scheme}.txt'
         print(f'Downloading proxies from [{proxies_url}]...')
         try:
-            response: Response = self._get_url_response(
+            response, _ = self._get_url_response(
                 proxies_url,
                 method=HTTPMethod.GET,
                 silent=True,
+                max_attempts=1,
             )
         except DownloadUnavailable as error:
-            raise ProxyUnavailable(f'Could not get the proxies list: {error}.')
+            print(f'::warning:: Could not get [{proxies_url}]: {error}.')
+            return []
         content: str = response.content.decode()
         return content.splitlines()
 
@@ -79,13 +91,15 @@ class Downloader(ABC):
         proxies_url: str = f'https://proxylist.geonode.com/api/proxy-list?protocols={scheme}&page=1&limit=500&sort_by=responseTime&sort_type=asc'
         print(f'Downloading proxies from [{proxies_url}]...')
         try:
-            response: Response = self._get_url_response(
+            response, _ = self._get_url_response(
                 proxies_url,
                 method=HTTPMethod.GET,
                 silent=True,
+                max_attempts=1,
             )
         except DownloadUnavailable as error:
-            raise ProxyUnavailable(f'Could not get the proxies list: {error}.')
+            print(f'::warning:: Could not get [{proxies_url}]: {error}.')
+            return []
         content: str = response.content.decode()
         try:
             data: dict[str, list[dict[str, str]]] = json.loads(content)
@@ -108,16 +122,21 @@ class Downloader(ABC):
     def _get_proxy_config_for_scheme(
         self,
         scheme: str,
-        renew: bool,
-    ) -> dict[str, str]:
-        """Returns the proxy config to use for a given URL."""
+        proxy_mode: ProxyMode,
+        renew_proxy: bool,
+    ) -> dict[str, str] | None:
+        """Returns the proxy config to use for a given scheme, or None."""
+        if proxy_mode in [ProxyMode.NEVER, ProxyMode.AFTER_FAILURE, ]:
+            return None
+
         # if an env var is supplied, always use it.
         if system_proxy := os.environ.get('DOWNLOAD_PROXY'):
             return {
                 scheme: system_proxy,
             }
+
         # if env var is not supplied, then use a random free proxy
-        if renew or scheme not in self.proxy_per_scheme:
+        if renew_proxy or scheme not in self.proxy_per_scheme:
             if scheme in self.proxy_per_scheme:
                 del self.proxy_per_scheme[scheme]
 
@@ -154,15 +173,24 @@ class Downloader(ABC):
             scheme: self.proxy_per_scheme[scheme],
         }
 
+    def _get_proxies_count_for_scheme(
+        self,
+        scheme: str,
+        proxy_mode: ProxyMode,
+    ) -> int | None:
+        """Returns the maximum number of proxies for the scheme (will cap the number of download attempts)."""
+        proxies: dict[str, str] | None = self._get_proxy_config_for_scheme(scheme, proxy_mode, renew_proxy=False)
+        return len(proxies) if proxies is not None else None
+
     def _get_url_response(
         self,
         url: str,
         method: Literal[HTTPMethod.GET, HTTPMethod.HEAD, ],
         max_attempts: int | None = None,
         retry_delay: int | None = None,
-        anonymize: bool = False,
+        proxy_mode: ProxyMode = ProxyMode.NEVER,
         silent: bool = False,
-    ) -> Response:
+    ) -> tuple[Response, ProxyMode]:
         """Performs a GET or HEAD request to the specified URL and returns the response.
         The retry delay (in seconds) is doubled after each failed attempt.
         When anonymize is True, a proxy is used (and changed at each retry if not the system proxy)."""
@@ -172,12 +200,19 @@ class Downloader(ABC):
             else:
                 print('Downloading information...')
         scheme: str = urlparse(url).scheme
-        max_attempts = max_attempts or self.default_max_attempts
-        if anonymize:
-            self._get_proxy_config_for_scheme(scheme, renew=False)
-            max_attempts = min(max_attempts, len(self.possible_proxies_per_scheme[scheme]))
         retry_delay = retry_delay or self.default_retry_delay
-        for attempt in range(1, max_attempts + 1):
+        attempt: int = 1
+        while True:
+            request_max_attempts = max_attempts or self.default_max_attempts
+            if proxies_count := self._get_proxies_count_for_scheme(scheme, proxy_mode) is not None:
+                request_max_attempts = min(
+                    request_max_attempts,
+                    proxies_count,
+                )
+            if attempt > request_max_attempts:
+                raise DownloadUnavailable(
+                    f'Download failed after {max_attempts} attempts.'
+                )
             try:
                 function = get if method == HTTPMethod.GET else head
                 return function(
@@ -185,20 +220,22 @@ class Downloader(ABC):
                     allow_redirects=True,
                     timeout=self.timeouts,
                     headers=self.headers,
-                    proxies=self._get_proxy_config_for_scheme(scheme, renew=attempt > 1) if anonymize else None,
-                )
+                    proxies=self._get_proxy_config_for_scheme(scheme, proxy_mode, renew_proxy=attempt > 1),
+                ), proxy_mode
             except RequestException as error:
-                if attempt < max_attempts:
-                    if anonymize:
-                        print(f'Download attempt {attempt} failed ({error}); retrying using another proxy...')
-                    else:
-                        print(f'Download attempt {attempt} failed ({error}); retrying in {retry_delay}s...')
-                        time.sleep(retry_delay)
-                        retry_delay *= 2
+                if attempt < request_max_attempts:
+                    match proxy_mode:
+                        case ProxyMode.NEVER:
+                            print(f'Download attempt #{attempt} failed ({error}); retrying in {retry_delay}s...')
+                            time.sleep(retry_delay)
+                            retry_delay *= 2
+                        case ProxyMode.AFTER_FAILURE:
+                            proxy_mode = ProxyMode.AFTER_FAILURE
+                            print(f'Download attempt #{attempt} failed ({error}); retrying using a proxy...')
+                        case ProxyMode.ALWAYS:
+                            print(f'Download attempt #{attempt} failed ({error}); retrying using another proxy...')
                 else:
                     print(f'Download attempt {attempt} failed ({error}).')
-
-        raise DownloadUnavailable(f'Download failed after {max_attempts} attempts.')
 
     def _download_file(
         self,
@@ -208,7 +245,7 @@ class Downloader(ABC):
         target_filename: str | None = None,
         max_attempts: int | None = None,
         retry_delay: int | None = None,
-        anonymize: bool = False,
+        proxy_mode: ProxyMode = ProxyMode.NEVER,
     ) -> Path:
         """Download a file from the specified URL.
         if *if_modified_since* is not None:
@@ -218,12 +255,12 @@ class Downloader(ABC):
         - otherwise the download is performed and the path of the resulting file is returned (a *DownloadUnavailable* exception is raised on failure).
         """
         if if_modified_since:
-            head_response: Response = self._get_url_response(
+            head_response, proxy_mode = self._get_url_response(
                 url,
                 method=HTTPMethod.HEAD,
                 max_attempts=max_attempts,
                 retry_delay=retry_delay,
-                anonymize=anonymize,
+                proxy_mode=proxy_mode,
             )
             last_modified_header: str = 'Last-Modified'
             last_modified: str = head_response.headers.get(last_modified_header, '')
@@ -236,12 +273,12 @@ class Downloader(ABC):
                 raise SourceDataUnchanged(f'URL is unchanged since [{if_modified_since_str}].')
             print(f'URL has changed since [{if_modified_since_str}].')
 
-        get_response: Response = self._get_url_response(
+        get_response, proxy_mode = self._get_url_response(
             url,
             method=HTTPMethod.GET,
             max_attempts=max_attempts,
             retry_delay=retry_delay,
-            anonymize=anonymize,
+            proxy_mode=proxy_mode,
             silent=not if_modified_since,
         )
 

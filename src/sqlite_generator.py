@@ -8,8 +8,6 @@ from pathlib import Path
 from sqlite3 import Connection, connect
 from typing import Any
 
-from requests import Response
-
 from aes_ecb import AesEcb
 from downloader import Downloader, DownloadUnavailable, SourceDataUnchanged
 
@@ -68,7 +66,7 @@ class SqliteGenerator(Downloader, ABC):
         url: str = f'https://api.github.com/repos/sharly-chess/databases/releases/tags/{tag}'
         print(f'Reading date of release [{tag}] from [{url}]...')
         try:
-            response: Response = self._get_url_response(
+            response, _ = self._get_url_response(
                 url,
                 method=HTTPMethod.GET,
             )
