@@ -179,8 +179,11 @@ class Downloader(ABC):
         proxy_mode: ProxyMode,
     ) -> int:
         """Returns the maximum number of proxies for the scheme (will cap the number of download attempts)."""
-        proxies: dict[str, str] | None = self._get_proxy_config_for_scheme(scheme, proxy_mode, renew_proxy=False)
-        return len(proxies) if proxies is not None else 0
+        proxy_config_by_scheme: dict[str, str] | None = self._get_proxy_config_for_scheme(scheme, proxy_mode, renew_proxy=False)
+        if proxy_config_by_scheme and scheme in proxy_config_by_scheme:
+            return len(proxy_config_by_scheme[scheme])
+        else:
+            return 0
 
     def _get_url_response(
         self,
