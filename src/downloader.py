@@ -217,10 +217,6 @@ class Downloader(ABC):
                     request_max_attempts,
                     proxies_count,
                 )
-            if attempt > request_max_attempts:
-                raise DownloadUnavailable(
-                    f'Download failed after {request_max_attempts} attempts.'
-                )
             try:
                 function = get if method == HTTPMethod.GET else head
                 return function(
@@ -231,20 +227,23 @@ class Downloader(ABC):
                     proxies=self._get_proxy_config_for_scheme(scheme, proxy_mode, renew_proxy=attempt > 1),
                 ), proxy_mode
             except RequestException as error:
-                if attempt < request_max_attempts:
-                    match proxy_mode:
-                        case ProxyMode.NEVER:
-                            print(f'Download attempt #{attempt} failed ({error}); retrying in {retry_delay}s...')
-                            time.sleep(retry_delay)
-                            retry_delay *= 2
-                        case ProxyMode.AFTER_FAILURE:
-                            proxy_mode = ProxyMode.ALWAYS
-                            print(f'Download attempt #{attempt} failed ({error}); retrying using a proxy...')
-                        case ProxyMode.ALWAYS:
-                            print(f'Download attempt #{attempt} failed ({error}); retrying using another proxy...')
-                    attempt += 1
-                else:
+                if attempt > request_max_attempts:
                     print(f'Download attempt #{attempt} failed ({error}), aborting.')
+                    break
+                match proxy_mode:
+                    case ProxyMode.NEVER:
+                        print(f'Download attempt #{attempt} failed ({error}); retrying in {retry_delay}s...')
+                        time.sleep(retry_delay)
+                        retry_delay *= 2
+                    case ProxyMode.AFTER_FAILURE:
+                        proxy_mode = ProxyMode.ALWAYS
+                        print(f'Download attempt #{attempt} failed ({error}); retrying using a proxy...')
+                    case ProxyMode.ALWAYS:
+                        print(f'Download attempt #{attempt} failed ({error}); retrying using another proxy...')
+                attempt += 1
+        raise DownloadUnavailable(
+            f'Download failed after {request_max_attempts} attempts.'
+        )
 
     def _download_file(
         self,
