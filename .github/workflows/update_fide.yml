@@ -2,7 +2,7 @@ name: FIDE Database Update
 
 on:
   schedule:
-    - cron: '17 5 * * *'  # once a day (source changes at most daily)
+    - cron: '0 */2 * * *'  # Every 2 hours
   workflow_dispatch:
 
 permissions:
