@@ -12,6 +12,8 @@ from pathlib import Path
 from sqlite3 import Connection, Cursor, IntegrityError
 from typing import Any
 
+from downloader import ProxyMode
+
 sys.path.extend(
     map(
         str,
@@ -27,8 +29,12 @@ from sqlite_generator import SqliteGenerator
 
 class EcfSqliteGenerator(SqliteGenerator):
 
-    ECF_DATABASE_URL = 'https://rating.englishchess.org.uk/v2/new/api.php?v2/rating_list_csv'
-    XML_FILENAME = 'players_list_xml.xml'
+    def __init__(self):
+        super().__init__()
+        self.ecf_database_url: str = 'https://rating.englishchess.org.uk/api/rating-list/csv'
+        self.ffe_public_url: str = 'http://echecs.asso.fr'
+        self.xml_filename: str = 'players_list_xml.xml'
+        self.download_max_attempts = 3
 
     @property
     def description(self) -> str:
@@ -42,24 +48,31 @@ class EcfSqliteGenerator(SqliteGenerator):
     def default_output_filename(self) -> str:
         return f'ecf_players_v{self.version}.enc'
 
-    @classmethod
+    @property
+    def marker_prefix(self):
+        return 'ecf'
+
     def generate_sqlite_database(
-        cls,
+        self,
         tmp_dir: Path,
     ) -> Path:
-        xml_path: Path = cls.download_csv_file(tmp_dir)
-        return cls.convert_csv_to_sqlite(xml_path)
+        xml_path: Path = self.download_csv_file(tmp_dir)
+        return self.convert_csv_to_sqlite(xml_path)
 
-    @classmethod
     def download_csv_file(
-        cls,
+        self,
         target_dir: Path) -> Path:
-        print(f'Downloading ECF database from {cls.ECF_DATABASE_URL}...')
-        csv_path: Path = cls._download_file(cls.ECF_DATABASE_URL, target_dir, target_filename='ecf_players.csv', timeout=120)
+        print(f'Downloading ECF database from {self.ecf_database_url}...')
+        csv_path: Path = self._download_file(
+            self.ecf_database_url,
+            target_dir,
+            target_filename='ecf_players.csv',
+            proxy_mode=ProxyMode.NEVER,
+        )
         return csv_path
 
-    @classmethod
-    def read_csv_file(cls, csv_path: Path) -> list[dict[str, str]]:
+    @staticmethod
+    def read_csv_file(csv_path: Path) -> list[dict[str, str]]:
         csv_players: list[dict[str, str]] = []
         with open(csv_path, 'rb') as raw_file:
             encoding = chardet.detect(raw_file.read())['encoding']
@@ -248,4 +261,4 @@ class EcfSqliteGenerator(SqliteGenerator):
 
 
 if __name__ == '__main__':
-    EcfSqliteGenerator().run(save_database=True)
+    EcfSqliteGenerator().run()
