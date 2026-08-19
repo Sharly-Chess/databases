@@ -160,11 +160,11 @@ class SqliteGenerator(Downloader, ABC):
                 self.create_marker('download-failed')
                 return
             except SourceDataUnchanged:
-                self.create_marker('source-unavailable')
+                self.create_marker('data-unchanged')
                 print('Source data unchanged, skipping update this run.')
                 return
             except ProxyUnavailable:
-                self.create_marker('proxy-unavailable')
+                self.create_marker('proxy-error')
                 print('Source data unchanged, skipping update this run.')
                 return
             AesEcb.encrypt_file(sqlite_file, self.output_file, self.key)
