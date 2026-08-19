@@ -19,10 +19,11 @@ authors = [
 ]
 
 dependencies = [
-  "chardet ~= 7.4.3",
-  "cryptography ~= 49.0.0",
+  "chardet ~= 7.5.1",
+  "cryptography ~= 50.0.0",
   "httpdate ~= 1.2.0",
   "requests ~= 2.34.2",
+  "tzdata",
 ]
 
 [project.optional-dependencies]

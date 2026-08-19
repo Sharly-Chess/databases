@@ -9,6 +9,7 @@ from http import HTTPMethod
 from pathlib import Path
 from sqlite3 import Connection, connect
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from aes_ecb import AesEcb
 from downloader import (
@@ -24,7 +25,7 @@ class SqliteGenerator(Downloader, ABC):
 
     def __init__(self):
         super().__init__()
-        self.start_date: str = datetime.now().strftime('%Y-%m-%d-%H-%M')
+        self.start_date: str = datetime.now(tz=ZoneInfo('Europe/Paris')).strftime('%Y-%m-%d-%H-%M-%S')
         self.output_file: Path = Path(self.default_output_filename)
         self.key: str = ''
         self.force_update: bool = False
