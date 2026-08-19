@@ -119,9 +119,9 @@ class FFEAccessDatabase(AccessDatabase):
         elo_min: int = 0,
         elo_max: int = 0,
         women_only: bool = False,
-        ffe_ids: list[int] = None,
-        federations: list[str] = None,
-        categories: list[str] = None,
+        ffe_ids: list[int] | None = None,
+        federations: list[str] | None = None,
+        categories: list[str] | None = None,
     ) -> dict[int, dict[str, Any]]:
         query: str = f"""
 SELECT 
@@ -147,7 +147,7 @@ WHERE
     {f'AND JOUEUR.Federation IN ({', '.join(map(lambda federation: f'\'{federation}\'', federations))})' if federations else ''}
     {f'AND JOUEUR.Elo >= {elo_min}' if elo_min else ''}
     {f'AND JOUEUR.Elo <= {elo_max}' if elo_max else ''}
-    {f'AND JOUEUR.Sexe = \'F\'' if women_only else ''}
+    {'AND JOUEUR.Sexe = \'F\'' if women_only else ''}
     {f'AND JOUEUR.Federation IN ({', '.join(map(lambda category: f'\'{category}\'', categories))})' if categories else ''}
     {f'AND JOUEUR.Ref IN ({', '.join(str(ffe_id) for ffe_id in ffe_ids)})' if ffe_ids else ''}
 """
@@ -164,9 +164,9 @@ WHERE
         elo_min: int = 0,
         elo_max: int = 0,
         women_only: bool = False,
-        ffe_ids: list[int] = None,
-        federations: list[str] = None,
-        categories: list[str] = None,
+        ffe_ids: list[int] | None = None,
+        federations: list[str] | None = None,
+        categories: list[str] | None = None,
     ) -> list[dict[str, Any]]:
         return list(
             self.get_players_by_ffe_id(
@@ -298,7 +298,7 @@ class Tournament(AccessDatabase):
         if not self.file.exists():
             if not download_file(f'https://www.echecs.asso.fr/Tournois/Id/{self.ffe_id}/{self.ffe_id}.papi'):
                 return
-        query: str = f"""
+        query: str = """
 SELECT 
     JOUEUR.FideTitre AS title,
     JOUEUR.Prenom AS first_name,

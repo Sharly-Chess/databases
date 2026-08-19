@@ -74,7 +74,7 @@ class Women19502199BeforeOrNow(PlayerContainer):
 def main():
     locale.setlocale(locale.LC_ALL, 'fr_FR.UTF-8')
     periods: list[datetime] = [
-        datetime(2026, 5, 1),
+        # datetime(2026, 5, 1),
     ]
     accession_pre_registration: PreRegistration = PreRegistration(Over2200Now())
     for tournament in (
@@ -86,7 +86,7 @@ def main():
         accession_pre_registration.add_players(tournament.players)
     accession_pre_registration.add_players(Over2200Before(periods).players)
     accession_pre_registration.add_players(Women19502199BeforeOrNow(periods).players)
-    accession_pre_registration.export(f'accession')
+    accession_pre_registration.export('accession')
 
 
 if __name__ == '__main__':

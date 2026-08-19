@@ -2,7 +2,7 @@ name: FIDE Database Update
 
 on:
   schedule:
-    - cron: '0 */2 * * *'  # every 2 hours
+    - cron: '0 */2 * * *'  # Every 2 hours
   workflow_dispatch:
 
 permissions:
@@ -22,22 +22,33 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests
-          pip install cryptography
+          pip install -e .
 
       - name: Generate FIDE SQLite database
         env:
           ENC_PASSWORD: ${{ secrets.FIDE_DATABASE_ENC_PASSWORD }}
-        run: python fide/generate_fide_sqlite.py --key="$ENC_PASSWORD"
+        run: python -u src/fide/generate_fide_sqlite.py --key="$ENC_PASSWORD"
 
       - name: Publish to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          ENC_DB_FILENAME=$(python -c "from fide.generate_fide_sqlite import FideSqliteGenerator as sqlite_generator; print(sqlite_generator().output_file)")
+          MARKER=$(python -c "from fide.generate_fide_sqlite import FideSqliteGenerator as g; s=g(); print(s.last_marker_filename)")
+          if [ ! -f "$MARKER" ]; then
+            echo "::warning::No marker found."
+            echo "no-marker" > $MARKER
+          fi
+          FILES=$(python -c "from fide.generate_fide_sqlite import FideSqliteGenerator as g; s=g(); print(s.output_file, *[s.output_file_for_version(v) for v in s.legacy_versions])")
           TAG="fide-latest"
+          for f in $FILES; do
+            if [ ! -f "$f" ]; then
+              echo "Expected files [$FILES] not found; keeping previous release."
+              gh release upload "$TAG" $MARKER
+              exit 0
+            fi
+          done
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ENC_DB_FILENAME" \
+          gh release create "$TAG" $FILES $MARKER \
             --title "FIDE Database" \
             --notes "Auto-updated daily" \
             --latest=false
