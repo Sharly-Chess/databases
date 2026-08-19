@@ -22,9 +22,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests
-          pip install cryptography
-          pip install chardet
+          pip install -e .
 
       - name: Generate ECF SQLite database
         env:
