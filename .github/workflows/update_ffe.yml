@@ -34,7 +34,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          MARKER=$(python -c "from fide.generate_ffe_sqlite import FfeSqliteGenerator as g; s=g(); print(s.last_marker_filename)")
+          MARKER=$(python -c "from ffe.generate_ffe_sqlite import FfeSqliteGenerator as g; s=g(); print(s.last_marker_filename)")
           if [ ! -f "$MARKER" ]; then
             echo "::warning::No marker found."
             echo "no-marker" > $MARKER
