@@ -1,0 +1,52 @@
+name: DSB Database Update
+
+on:
+  schedule:
+    - cron: '0 */2 * * *'  # every 2 hours
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update-dsb-database:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4.2.2
+
+      - name: Setup Python
+        uses: actions/setup-python@v5.5.0
+        with:
+          python-version: '3.13'
+
+      - name: Install dependencies
+        run: |
+          pip install -e .
+
+      - name: Generate DSB SQLite database
+        env:
+          ENC_PASSWORD: ${{ secrets.DSB_DATABASE_ENC_PASSWORD }}
+        run: python -u src/dsb/generate_dsb_sqlite.py --key="$ENC_PASSWORD"
+
+      - name: Publish to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          MARKER=$(python -c "from dsb.generate_dsb_sqlite import DsbSqliteGenerator as g; s=g(); print(s.last_marker_filename)")
+          if [ ! -f "$MARKER" ]; then
+            echo "::warning::No marker found."
+            echo "no-marker" > $MARKER
+          fi
+          ENC_DB_FILENAME=$(python -c "from dsb.generate_dsb_sqlite import DsbSqliteGenerator as sqlite_generator; print(sqlite_generator().output_file)")
+          TAG="dsb-latest"
+          if [ ! -f "$ENC_DB_FILENAME" ]; then
+            echo "Expected file [$$ENC_DB_FILENAME] not found; keeping previous release."
+            gh release upload "$TAG" $MARKER
+            exit 0
+          fi
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" "$ENC_DB_FILENAME" $MARKER \
+            --title "DSB Database" \
+            --notes "Auto-updated daily" \
+            --latest=false

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Standalone script: download the ECF player database (Data.mdb), convert it to SQLite.
+Standalone script: download the ECF player database, convert it to SQLite.
 Does not depend on the full Sharly Chess app environment — only requires `requests` and `chardet`.
 """
 import csv
-from itertools import islice
-
-import chardet
 import sys
+from itertools import islice
 from pathlib import Path
 from sqlite3 import Connection, Cursor, IntegrityError
 from typing import Any
+
+import chardet
 
 from downloader import ProxyMode
 
