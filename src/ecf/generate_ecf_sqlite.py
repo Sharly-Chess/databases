@@ -60,11 +60,14 @@ class EcfSqliteGenerator(SqliteGenerator):
 
     def download_csv_file(
         self,
-        target_dir: Path) -> Path:
+        target_dir: Path,
+    ) -> Path:
+        last_publish: int | None = self._get_github_release_date('fide-latest')
         print(f'Downloading ECF database from {self.ecf_database_url}...')
         csv_path: Path = self._download_file(
             self.ecf_database_url,
             target_dir,
+            if_modified_since=last_publish,
             target_filename='ecf_players.csv',
             proxy_mode=ProxyMode.NEVER,
         )

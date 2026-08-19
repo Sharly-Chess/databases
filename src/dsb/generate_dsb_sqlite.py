@@ -70,10 +70,12 @@ class DsbSqliteGenerator(SqliteGenerator):
         self,
         target_dir: Path
     ) -> Path:
+        last_publish: int | None = self._get_github_release_date('fide-latest')
         print(f'Downloading DSB database from {self.dsb_database_url}...')
         archive_path: Path = self._download_file(
             self.dsb_database_url,
             target_dir,
+            if_modified_since=last_publish,
             proxy_mode=ProxyMode.NEVER,
         )
         return archive_path
