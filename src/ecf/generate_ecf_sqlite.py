@@ -33,7 +33,6 @@ class EcfSqliteGenerator(SqliteGenerator):
         super().__init__()
         self.ecf_database_url: str = 'https://rating.englishchess.org.uk/api/rating-list/csv'
         self.ffe_public_url: str = 'http://echecs.asso.fr'
-        self.xml_filename: str = 'players_list_xml.xml'
         self.download_max_attempts = 3
 
     @property
