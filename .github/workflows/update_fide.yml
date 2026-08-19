@@ -34,28 +34,21 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           MARKER=$(python -c "from fide.generate_fide_sqlite import FideSqliteGenerator as g; s=g(); print(s.last_marker_filename)")
+          if [ ! -f "$MARKER" ]; then
+            echo "::warning::No marker found."
+            echo "no-marker" > $MARKER
+          fi
           FILES=$(python -c "from fide.generate_fide_sqlite import FideSqliteGenerator as g; s=g(); print(s.output_file, *[s.output_file_for_version(v) for v in s.legacy_versions])")
           TAG="fide-latest"
-          # The generator soft-exits (no files) when FIDE is unreachable; keep the
-          # last good release untouched in that case instead of wiping it.
           for f in $FILES; do
             if [ ! -f "$f" ]; then
               echo "Expected files [$FILES] not found; keeping previous release."
-              if [ ! -f "$MARKER" ]; then
-                echo "::warning::No marker found."
-                touch "$MARKER"
-              fi
               gh release upload "$TAG" $MARKER
               exit 0
             fi
           done
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" $FILES \
+          gh release create "$TAG" $FILES $MARKER \
             --title "FIDE Database" \
             --notes "Auto-updated daily" \
             --latest=false
-          if [ ! -f "$MARKER" ]; then
-            echo "::warning::No marker found."
-            touch "$MARKER"
-          fi
-          gh release upload "$TAG" $MARKER

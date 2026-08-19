@@ -33,14 +33,20 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          MARKER=$(python -c "from fra_schools.generate_ffe_sqlite import FraSchoolsSqliteGenerator as g; s=g(); print(s.last_marker_filename)")
+          if [ ! -f "$MARKER" ]; then
+            echo "::warning::No marker found."
+            echo "no-marker" > $MARKER
+          fi
           ENC_DB_FILENAME=$(python -c "from fra_schools.generate_fra_schools_sqlite import FraSchoolsSqliteGenerator as sqlite_generator; print(sqlite_generator().output_file)")
+          TAG="fra-schools-latest"
           if [ ! -f "$ENC_DB_FILENAME" ]; then
             echo "No database produced, keeping previous release."
+            gh release upload "$TAG" $MARKER
             exit 0
           fi
-          TAG="fra-schools-latest"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ENC_DB_FILENAME" \
+          gh release create "$TAG" "$ENC_DB_FILENAME" $MARKER \
             --title "FRA Schools Database" \
             --notes "Auto-updated daily" \
             --latest=false
