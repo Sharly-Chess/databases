@@ -233,7 +233,7 @@ class FfeSqliteGenerator(SqliteGenerator):
 
         mdb_path = target_dir / self.mdb_filename
         if not mdb_path.exists():
-            raise RuntimeError(f'{self.mdb_filename} not found after extraction')
+            raise RuntimeError(f'[{self.mdb_filename}] not found after extraction')
         return mdb_path
 
     def convert_mdb_to_sqlite(
