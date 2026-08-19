@@ -188,7 +188,7 @@ class FideSqliteGenerator(SqliteGenerator):
             case 'F' | 'f' | 'M' | 'm':
                 return value.upper()
             case _:
-                raise ValueError(f'Unknown value: {value}')
+                raise ValueError(f'Unknown gender value: {value}')
 
     @staticmethod
     def sqlite_open_title_from_xml_value(value: str) -> str:
@@ -211,7 +211,7 @@ class FideSqliteGenerator(SqliteGenerator):
             case '' | 'WCM' | 'WFM' | 'WIM' | 'WGM':
                 return value
             case _:
-                raise ValueError(f'Unknown value: {value}')
+                raise ValueError(f'Unknown title value: {value}')
 
     @staticmethod
     def sqlite_arbiter_title_from_xml_value(value: str) -> str:
