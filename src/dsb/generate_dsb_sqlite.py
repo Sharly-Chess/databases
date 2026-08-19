@@ -50,6 +50,10 @@ class DsbSqliteGenerator(SqliteGenerator):
         return f'dsb_players_v{self.version}.enc'
 
     @property
+    def db_file(self) -> Path:
+        return self.output_file.with_suffix('.db')
+
+    @property
     def marker_prefix(self):
         return 'dsb'
 
@@ -175,7 +179,8 @@ class DsbSqliteGenerator(SqliteGenerator):
                 club_name = club_data['name']
                 dsb_state = club_data['state_id']
             except KeyError:
-                print(f'::warning:: Player with DSB code [{dsb_code}] has an invalid club ID [{club_id}].')
+                # Player has an invalid club ID [{club_id}], generally overridden by other declarations with the same DSB code.
+                pass
             fide_rating = cls.sqlite_player_rating_from_csv_value(player_data['FIDE-Elozahl'])
             national_rating = cls.sqlite_player_rating_from_csv_value(player_data['DWZ'])
             players_by_dsb_code[dsb_code] = {
