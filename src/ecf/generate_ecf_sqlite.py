@@ -62,7 +62,7 @@ class EcfSqliteGenerator(SqliteGenerator):
         self,
         target_dir: Path,
     ) -> Path:
-        last_publish: int | None = self._get_github_release_date('fide-latest')
+        last_publish: int | None = self._get_github_release_date('ecf-latest')
         print(f'Downloading ECF database from {self.ecf_database_url}...')
         csv_path: Path = self._download_file(
             self.ecf_database_url,
