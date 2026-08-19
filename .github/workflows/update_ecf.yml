@@ -4,7 +4,6 @@ on:
   #schedule:
     #- cron: '0 */2 * * *'  # every 2 hours
   workflow_dispatch:
-  pull_request:
 
 permissions:
   contents: write
@@ -30,7 +29,7 @@ jobs:
       - name: Generate ECF SQLite database
         env:
           ENC_PASSWORD: ${{ secrets.ECF_DATABASE_ENC_PASSWORD }}
-        run: python ecf/generate_ecf_sqlite.py --key="$ENC_PASSWORD"
+        run: python -u src/ecf/generate_ecf_sqlite.py --key="$ENC_PASSWORD"
 
       - name: Publish to GitHub Release
         env:
