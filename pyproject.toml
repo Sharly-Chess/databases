@@ -23,16 +23,16 @@ dependencies = [
   "cryptography ~= 50.0.0",
   "httpdate ~= 1.2.0",
   "requests ~= 2.34.2",
-  "tzdata",
+  "tzdata ~= 2026.3",
 ]
 
 [project.optional-dependencies]
 lint = [
-  "ruff ~= 0.15.0",
+  "ruff ~= 0.16.3",
   "validate-pyproject ~= 0.25",
-  "pipdeptree ~= 4.1.0",
-  "mypy >= 2.3.0",
-  "pre-commit ~= 4.6.1",
+  "pipdeptree ~= 4.2.1",
+  "mypy >= 2.3.1",
+  "pre-commit ~= 4.6.2",
 ]
 
 ffe-france-pre-registration = [
