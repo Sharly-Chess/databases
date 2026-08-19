@@ -122,7 +122,7 @@ class SqliteGenerator(Downloader, ABC):
             for filename in sorted(
                 filename
                 for filename in glob.glob('*')
-                if re.match(r'^.*-\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-.+', filename) and Path(filename).is_file()
+                if re.match(r'^.*_\d{4}-\d{2}-\d{2}-\d{2}-\d{2}_.+', filename) and Path(filename).is_file()
             )
         ]
 
@@ -135,7 +135,7 @@ class SqliteGenerator(Downloader, ABC):
         self,
         suffix: str,
     ):
-        filename: str = f'{self.marker_prefix}-{self.start_date}-{suffix}'
+        filename: str = f'{self.marker_prefix}_{self.start_date}_{suffix}'
         with open(Path(filename), "w") as file:
             file.write(suffix)
         print(f'Created marker file {filename}.')
