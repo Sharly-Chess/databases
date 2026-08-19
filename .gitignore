@@ -1,7 +1,8 @@
 /.idea/
 *.db
 *.enc
-/ffe/france/download/*
-/ffe/france/archives/*
+/src/ffe/france/download/*
+/src/ffe/france/archives/*
 __pycache__/
 *.pyc
+/src/sharly_chess_databases.egg-info/

@@ -86,7 +86,7 @@ def main():
         accession_pre_registration.add_players(tournament.players)
     accession_pre_registration.add_players(Over2200Before(periods).players)
     accession_pre_registration.add_players(Women19502199BeforeOrNow(periods).players)
-    accession_pre_registration.export(f'accession')
+    accession_pre_registration.export('accession')
 
 
 if __name__ == '__main__':

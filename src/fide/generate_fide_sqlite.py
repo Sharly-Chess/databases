@@ -5,31 +5,38 @@ Does not depend on the full Sharly Chess app environment — only requires `requ
 """
 
 import sys
-import tempfile
 import zipfile
 from pathlib import Path
 from sqlite3 import Connection, Cursor
 from typing import Callable, Any
 from xml.etree import ElementTree
 
+from downloader import ProxyMode
+
 sys.path.extend(
     map(
         str,
         [
-            Path(__file__).parents[1],  # The root path
+            Path(__file__).parents[1],  # The path to the sources of the application
         ],
     )
 )
 
 from aes_ecb import AesEcb
 from progress import Progress
-from sqlite_generator import DownloadUnavailable, SqliteGenerator
+from sqlite_generator import SqliteGenerator
 
 
 class FideSqliteGenerator(SqliteGenerator):
 
-    FIDE_DATABASE_URL = 'https://ratings.fide.com/download/players_list_xml_legacy.zip'
-    XML_FILENAME = 'players_list_xml.xml'
+    def __init__(self):
+        super().__init__()
+        self.fide_database_url: str = 'https://ratings.fide.com/download/players_list_xml_legacy.zip'
+        self.xml_filename = 'players_list_xml.xml'
+
+        # The FIDE server times out intermittently, so downloads are retried.
+        self.download_max_attempts = 50
+        self.download_retry_delay = 30
 
     @property
     def description(self) -> str:
@@ -57,46 +64,40 @@ class FideSqliteGenerator(SqliteGenerator):
         return self.output_file.with_name(f'fide_players_v{version}.enc')
 
     @property
-    def _legacy_builders(self) -> dict[int, Callable[[Path, Path], Path]]:
+    def _legacy_builders(self) -> dict[int, Callable[[Path], Path]]:
         return {
             1: self.build_v1_database,
         }
 
-    def run(self):
-        self.parse_arguments()
-        with tempfile.TemporaryDirectory() as tmp:
-            tmp_dir = Path(tmp)
-            # The XML is downloaded and parsed only once, for the current schema.
-            try:
-                sqlite_file: Path = self.generate_sqlite_database(tmp_dir)
-            except DownloadUnavailable as error:
-                print(f'::warning::Source unavailable, skipping update this run: {error}')
-                return
-            AesEcb.encrypt_file(sqlite_file, self.output_file, self.key)
-            print(f'SQLite database encrypted to {self.output_file}.')
-            # Every legacy version is derived from it with a plain SQL copy.
-            for version in self.legacy_versions:
-                builder = self._legacy_builders.get(version)
-                if builder is None:
-                    raise ValueError(f'No legacy database builder for version {version}')
-                legacy_file: Path = builder(sqlite_file, tmp_dir)
-                legacy_output: Path = self.output_file_for_version(version)
-                AesEcb.encrypt_file(legacy_file, legacy_output, self.key)
-                print(f'Legacy (v{version}) database encrypted to {legacy_output}.')
+    @property
+    def marker_prefix(self):
+        return 'fide'
 
-    @classmethod
     def generate_sqlite_database(
-        cls,
+        self,
         tmp_dir: Path,
     ) -> Path:
-        xml_path: Path = cls.download_xml_file(tmp_dir)
-        return cls.convert_xml_to_sqlite(xml_path)
+        xml_path: Path = self.download_xml_file(tmp_dir)
+        return self.convert_xml_to_sqlite(xml_path)
+
+    def post_run(
+        self,
+        sqlite_file: Path,
+    ):
+        # Every legacy version is derived from it with a plain SQL copy.
+        for version in self.legacy_versions:
+            builder = self._legacy_builders.get(version)
+            if builder is None:
+                raise ValueError(f'No legacy database builder for version {version}')
+            legacy_file: Path = builder(sqlite_file)
+            legacy_output: Path = self.output_file_for_version(version)
+            AesEcb.encrypt_file(legacy_file, legacy_output, self.key)
+            print(f'Legacy (v{version}) database encrypted to {legacy_output}.')
 
     @classmethod
     def build_v1_database(
         cls,
         sqlite_file: Path,
-        tmp_dir: Path,
     ) -> Path:
         """Build the v1 database (no `fide_women_title` column) from the current one.
 
@@ -105,6 +106,7 @@ class FideSqliteGenerator(SqliteGenerator):
         here from the two split columns, so no second download/parse is needed.
         """
         print('Deriving legacy (v1) database...')
+        tmp_dir: Path = sqlite_file.parent
         legacy_file: Path = tmp_dir / 'players_list_xml_v1.db'
         database: Connection = cls._create_sqlite_database(legacy_file)
         database.execute(f"ATTACH DATABASE '{sqlite_file}' AS current")
@@ -156,20 +158,28 @@ class FideSqliteGenerator(SqliteGenerator):
         print(f'Legacy (v1) database built ({size_mb:.1f} MB)')
         return legacy_file
 
-    @classmethod
     def download_xml_file(
-        cls,
-        target_dir: Path) -> Path:
-        print(f'Downloading FIDE database from {cls.FIDE_DATABASE_URL}...')
-        zip_path: Path = cls._download_file(cls.FIDE_DATABASE_URL, target_dir)
+        self,
+        target_dir: Path,
+    ) -> Path:
+        last_publish: int | None = self._get_github_release_date('fide-latest')
+        print(f'Downloading FIDE database from [{self.fide_database_url}]...')
+        zip_path: Path = self._download_file(
+            self.fide_database_url,
+            target_dir,
+            if_modified_since=last_publish,
+            max_attempts=self.download_max_attempts,
+            retry_delay=self.download_retry_delay,
+            proxy_mode=ProxyMode.AFTER_FAILURE,
+        )
 
         with zipfile.ZipFile(zip_path, 'r') as zf:
             zf.extractall(target_dir)
         zip_path.unlink()
 
-        xml_path = target_dir / cls.XML_FILENAME
+        xml_path = target_dir / self.xml_filename
         if not xml_path.exists():
-            raise RuntimeError(f'{cls.XML_FILENAME} not found after extraction')
+            raise RuntimeError(f'{self.xml_filename} not found after extraction')
         return xml_path
 
     @staticmethod
