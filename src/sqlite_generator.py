@@ -25,7 +25,7 @@ class SqliteGenerator(Downloader, ABC):
 
     def __init__(self):
         super().__init__()
-        self.start_date: str = datetime.now(tz=ZoneInfo('Europe/Paris')).strftime('%Y-%m-%d-%H-%M-%S')
+        self.start_date: str = datetime.now(tz=ZoneInfo('Europe/Paris')).strftime('%Y-%m-%d-%H-%M')
         self.output_file: Path = Path(self.default_output_filename)
         self.key: str = ''
         self.force_update: bool = False
