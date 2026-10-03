@@ -60,7 +60,10 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
         self,
         source_file_dir: Path,
     ) -> Path:
-        types: list[str] = ['Ecole', 'Collège', 'Lycée']
+        # The FFE school championship (J03 art. 1.2.1) is open to medical and
+        # educational establishments (IME, ITEP…), listed as 'Médico-social',
+        # and to adapted teaching, which includes the EREA.
+        types: list[str] = ['Ecole', 'Collège', 'Lycée', 'Médico-social', 'EREA']
         # See https://data.education.gouv.fr/api/v2/console
         base_url: str = 'https://data.education.gouv.fr/api/v2/catalog/datasets/fr-en-annuaire-education/exports/json'
         url: str = (
