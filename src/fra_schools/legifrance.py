@@ -18,9 +18,9 @@ from downloader import DownloadUnavailable
 OAUTH_URL = 'https://oauth.piste.gouv.fr/api/oauth/token'
 API_URL = 'https://api.piste.gouv.fr/dila/legifrance/lf-engine-app'
 TIMEOUT = 60
-# PISTE regularly answers 503, and sometimes rejects valid credentials for a
-# while, so every request is retried after 10s, 20s and 40s.
-RETRY_DELAYS = (10, 20, 40)
+# PISTE regularly answers 503, and sometimes rejects valid credentials for
+# several minutes, so every request is retried after 1, 2, 4 and 8 minutes.
+RETRY_DELAYS = (60, 120, 240, 480)
 
 # The arrêté is republished each year under this title. The ones amending it
 # in the course of the year ("Arrêté du ... modifiant l'arrêté du ... fixant la
