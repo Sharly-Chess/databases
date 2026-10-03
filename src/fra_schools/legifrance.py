@@ -7,6 +7,7 @@ Légifrance API (https://piste.gouv.fr).
 import html
 import os
 import re
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -17,6 +18,9 @@ from downloader import DownloadUnavailable
 OAUTH_URL = 'https://oauth.piste.gouv.fr/api/oauth/token'
 API_URL = 'https://api.piste.gouv.fr/dila/legifrance/lf-engine-app'
 TIMEOUT = 60
+# PISTE regularly answers 503, and sometimes rejects valid credentials for a
+# while, so every request is retried after 10s, 20s and 40s.
+RETRY_DELAYS = (10, 20, 40)
 
 # The arrêté is republished each year under this title. The ones amending it
 # in the course of the year ("Arrêté du ... modifiant l'arrêté du ... fixant la
@@ -92,12 +96,24 @@ class LegifranceClient:
 
     @staticmethod
     def _send(url: str, **kwargs: Any) -> dict[str, Any]:
+        for delay in RETRY_DELAYS:
+            try:
+                return LegifranceClient._post(url, **kwargs)
+            except (requests.RequestException, ValueError) as error:
+                print(
+                    f'Légifrance request to [{url}] failed ({error}); retrying in {delay}s...'
+                )
+                time.sleep(delay)
         try:
-            response = requests.post(url, timeout=TIMEOUT, **kwargs)
-            response.raise_for_status()
-            return response.json()
+            return LegifranceClient._post(url, **kwargs)
         except (requests.RequestException, ValueError) as error:
             raise DownloadUnavailable(f'Légifrance request to [{url}] failed: {error}')
+
+    @staticmethod
+    def _post(url: str, **kwargs: Any) -> dict[str, Any]:
+        response = requests.post(url, timeout=TIMEOUT, **kwargs)
+        response.raise_for_status()
+        return response.json()
 
     def latest_list_text_id(self) -> tuple[str, str]:
         """The id and title of the text holding the current list: the latest
