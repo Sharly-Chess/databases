@@ -9,7 +9,7 @@ import os
 import re
 import time
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 
 import requests
 
@@ -74,46 +74,63 @@ class LegifranceClient:
         if self.token is None:
             response = self._send(
                 OAUTH_URL,
-                data={
-                    'grant_type': 'client_credentials',
-                    'client_id': self.client_id,
-                    'client_secret': self.client_secret,
-                    'scope': 'openid',
+                lambda: {
+                    'data': {
+                        'grant_type': 'client_credentials',
+                        'client_id': self.client_id,
+                        'client_secret': self.client_secret,
+                        'scope': 'openid',
+                    }
                 },
             )
             self.token = response['access_token']
         return self.token
 
     def _call(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        # The token is read on each attempt, as a 401 drops it.
         return self._send(
             f'{API_URL}{path}',
-            json=body,
-            headers={
-                'Authorization': f'Bearer {self._authenticate()}',
-                'Accept': 'application/json',
+            lambda: {
+                'json': body,
+                'headers': {
+                    'Authorization': f'Bearer {self._authenticate()}',
+                    'Accept': 'application/json',
+                },
             },
         )
 
-    @staticmethod
-    def _send(url: str, **kwargs: Any) -> dict[str, Any]:
+    def _send(
+        self, url: str, request_arguments: Callable[[], dict[str, Any]]
+    ) -> dict[str, Any]:
         for delay in RETRY_DELAYS:
             try:
-                return LegifranceClient._post(url, **kwargs)
+                return self._post(url, request_arguments())
             except (requests.RequestException, ValueError) as error:
+                self._forget_rejected_token(error)
                 print(
                     f'Légifrance request to [{url}] failed ({error}); retrying in {delay}s...'
                 )
                 time.sleep(delay)
         try:
-            return LegifranceClient._post(url, **kwargs)
+            return self._post(url, request_arguments())
         except (requests.RequestException, ValueError) as error:
             raise DownloadUnavailable(f'Légifrance request to [{url}] failed: {error}')
 
     @staticmethod
-    def _post(url: str, **kwargs: Any) -> dict[str, Any]:
-        response = requests.post(url, timeout=TIMEOUT, **kwargs)
+    def _post(url: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        response = requests.post(url, timeout=TIMEOUT, **arguments)
         response.raise_for_status()
         return response.json()
+
+    def _forget_rejected_token(self, error: Exception) -> None:
+        """PISTE sometimes stops honouring a token it has just issued; the
+        next attempt asks for a new one."""
+        if (
+            isinstance(error, requests.HTTPError)
+            and error.response is not None
+            and error.response.status_code == 401
+        ):
+            self.token = None
 
     def latest_list_text_id(self) -> tuple[str, str]:
         """The id and title of the text holding the current list: the latest
