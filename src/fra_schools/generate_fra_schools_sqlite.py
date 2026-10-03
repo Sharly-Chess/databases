@@ -7,12 +7,13 @@ Does not depend on the full Sharly Chess app environment — only requires `requ
 import json
 import re
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from sqlite3 import Connection, Cursor
 from typing import Callable, Any
 from urllib.parse import urlencode
 
-from downloader import ProxyMode
+from downloader import DownloadUnavailable, ProxyMode
 
 sys.path.extend(
     map(
@@ -23,8 +24,25 @@ sys.path.extend(
     )
 )
 
+from fra_schools.legifrance import LegifranceClient, SchoolAbroad
 from progress import Progress
 from sqlite_generator import SqliteGenerator
+
+# INSEE code for the schools abroad, which have no department.
+ABROAD_DEPARTMENT_ID = '99'
+ABROAD_DEPARTMENT_NAME = 'Étranger'
+
+# The schools abroad are published next to the database, so that a run that
+# can't reach Légifrance keeps the ones of the previous run.
+ABROAD_FILENAME = 'fra_schools_abroad.json'
+ABROAD_PUBLISHED_URL = (
+    'https://github.com/Sharly-Chess/databases/releases/download/fra-schools-latest/'
+    + ABROAD_FILENAME
+)
+
+# The Licence Ouverte 2.0 of the Légifrance data asks to credit the source.
+RELEASE_NOTES_FILENAME = 'fra_schools_release_notes.md'
+LEGIFRANCE_CREDIT = 'Légifrance (DILA), Licence Ouverte 2.0'
 
 
 class FraSchoolsSqliteGenerator(SqliteGenerator):
@@ -54,7 +72,61 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
         tmp_dir: Path,
     ) -> Path:
         json_path: Path = self.download_json_file(tmp_dir)
-        return self.convert_json_to_sqlite(json_path)
+        source, schools_abroad = self.download_schools_abroad(tmp_dir)
+        Path(ABROAD_FILENAME).write_text(
+            json.dumps(
+                {
+                    'source': source,
+                    'credit': LEGIFRANCE_CREDIT,
+                    'schools': [asdict(school) for school in schools_abroad],
+                },
+                ensure_ascii=False,
+                indent=1,
+            ),
+            encoding='utf-8',
+        )
+        notes = 'Auto-updated daily'
+        if source:
+            notes += f'\n\nSchools abroad: {source}, {LEGIFRANCE_CREDIT}.'
+        Path(RELEASE_NOTES_FILENAME).write_text(notes + '\n', encoding='utf-8')
+        return self.convert_json_to_sqlite(json_path, schools_abroad)
+
+    def download_schools_abroad(
+        self,
+        tmp_dir: Path,
+    ) -> tuple[str | None, list[SchoolAbroad]]:
+        """The title of the arrêté listing the schools abroad, and the schools."""
+        # The FFE school championship (J03 art. 1.2.1) is open to the French
+        # schools abroad, which the directory of the Éducation nationale does
+        # not list.
+        client = LegifranceClient.from_environment()
+        if client is None:
+            print('::warning::PISTE_CLIENT_ID and PISTE_CLIENT_SECRET not set.')
+        else:
+            print('Downloading the French schools abroad from Légifrance...')
+            try:
+                title, schools = client.schools_abroad()
+                print(f'{len(schools)} schools abroad found in [{title}].')
+                return title, schools
+            except DownloadUnavailable as error:
+                print(f'::warning::{error}')
+        print(f'Keeping the previously published schools abroad from [{ABROAD_PUBLISHED_URL}]...')
+        try:
+            published_path: Path = self._download_file(
+                ABROAD_PUBLISHED_URL,
+                tmp_dir,
+                target_filename=ABROAD_FILENAME,
+                max_attempts=self.download_max_attempts,
+            )
+        except DownloadUnavailable:
+            if client is None:
+                print('::warning::No schools abroad published yet, skipping them.')
+                return None, []
+            raise
+        published = json.loads(published_path.read_text(encoding='utf-8'))
+        schools = [SchoolAbroad(**school) for school in published['schools']]
+        print(f'{len(schools)} schools abroad kept from [{published["source"]}].')
+        return published['source'], schools
 
     def download_json_file(
         self,
@@ -113,6 +185,7 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
     def convert_json_to_sqlite(
         cls,
         json_path: Path,
+        schools_abroad: list[SchoolAbroad],
     ) -> Path:
         sqlite_file: Path = json_path.with_suffix('.db')
         print('Loading JSON data...')
@@ -243,6 +316,30 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
             database.executemany(school_query, to_write_schools)
         progress.log(school_count)
         database.commit()
+
+        if schools_abroad:
+            database.execute(
+                department_query,
+                {'id': ABROAD_DEPARTMENT_ID, 'name': ABROAD_DEPARTMENT_NAME},
+            )
+            known_codes = {code for (code,) in database.execute('SELECT code FROM school')}
+            abroad_rows = [
+                {
+                    'code': school.uai,
+                    'name': cls.protect_string(school.name),
+                    'department': ABROAD_DEPARTMENT_ID,
+                    'postal_code': '',
+                    'city': cls.protect_string(f'{school.city}, {school.country}'),
+                    'type': school.levels,
+                    'private': False,
+                }
+                for school in schools_abroad
+                if school.uai not in known_codes
+            ]
+            database.executemany(school_query, abroad_rows)
+            database.commit()
+            school_count += len(abroad_rows)
+            print(f'{len(abroad_rows)} schools abroad added.')
 
         database.execute(
             """
