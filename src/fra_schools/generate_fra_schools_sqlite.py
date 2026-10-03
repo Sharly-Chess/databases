@@ -24,7 +24,11 @@ sys.path.extend(
     )
 )
 
-from fra_schools.legifrance import LegifranceClient, SchoolAbroad
+from fra_schools.legifrance import (
+    LegifranceClient,
+    LegifranceFormatError,
+    SchoolAbroad,
+)
 from progress import Progress
 from sqlite_generator import SqliteGenerator
 
@@ -39,6 +43,11 @@ ABROAD_PUBLISHED_URL = (
     'https://github.com/Sharly-Chess/databases/releases/download/fra-schools-latest/'
     + ABROAD_FILENAME
 )
+
+# Written when Légifrance no longer answers in the expected format, so that
+# the workflow fails once the database (with the previous schools abroad) is
+# published.
+ABROAD_ERROR_FILENAME = 'fra_schools_abroad_error.txt'
 
 # The Licence Ouverte 2.0 of the Légifrance data asks to credit the source.
 RELEASE_NOTES_FILENAME = 'fra_schools_release_notes.md'
@@ -99,6 +108,7 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
         # The FFE school championship (J03 art. 1.2.1) is open to the French
         # schools abroad, which the directory of the Éducation nationale does
         # not list.
+        Path(ABROAD_ERROR_FILENAME).unlink(missing_ok=True)
         client = LegifranceClient.from_environment()
         if client is None:
             print('::warning::PISTE_CLIENT_ID and PISTE_CLIENT_SECRET not set.')
@@ -108,6 +118,9 @@ class FraSchoolsSqliteGenerator(SqliteGenerator):
                 title, schools = client.schools_abroad()
                 print(f'{len(schools)} schools abroad found in [{title}].')
                 return title, schools
+            except LegifranceFormatError as error:
+                print(f'::warning::{error}')
+                Path(ABROAD_ERROR_FILENAME).write_text(f'{error}\n', encoding='utf-8')
             except DownloadUnavailable as error:
                 print(f'::warning::{error}')
         print(f'Keeping the previously published schools abroad from [{ABROAD_PUBLISHED_URL}]...')

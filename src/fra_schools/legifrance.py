@@ -18,15 +18,27 @@ OAUTH_URL = 'https://oauth.piste.gouv.fr/api/oauth/token'
 API_URL = 'https://api.piste.gouv.fr/dila/legifrance/lf-engine-app'
 TIMEOUT = 60
 
-# The arrêté is republished each year under this title; the ones amending it
-# in the course of the year start with "Arrêté du ... modifiant".
+# The arrêté is republished each year under this title. The ones amending it
+# in the course of the year ("Arrêté du ... modifiant l'arrêté du ... fixant la
+# liste...") replace its whole annex.
 TITLE_SEARCH = 'fixant liste établissements enseignement français étranger homologués'
-TITLE_PATTERN = re.compile(
-    r'^Arrêté du .+ fixant la liste des (écoles et des )?établissements '
+LIST_TITLE_END = (
+    r'fixant la liste des (écoles et des )?établissements '
     r"d'enseignement français à l'étranger homologués"
+)
+YEARLY_TITLE_PATTERN = re.compile(
+    rf'^Arrêté du (?P<date>(?:(?! modifiant ).)+?) {LIST_TITLE_END}'
+)
+AMENDING_TITLE_PATTERN = re.compile(
+    rf"^Arrêté du .+? modifiant l'arrêté du (?P<date>.+?) {LIST_TITLE_END}"
 )
 
 UAI_PATTERN = re.compile(r'^\d{7}[A-Z]$')
+
+
+class LegifranceFormatError(DownloadUnavailable):
+    """Légifrance answered, but not with the arrêté or the table expected —
+    the code needs adapting, which retrying won't fix."""
 
 
 @dataclass(frozen=True)
@@ -88,7 +100,8 @@ class LegifranceClient:
             raise DownloadUnavailable(f'Légifrance request to [{url}] failed: {error}')
 
     def latest_list_text_id(self) -> tuple[str, str]:
-        """The id and title of the latest arrêté fixing the list."""
+        """The id and title of the text holding the current list: the latest
+        yearly arrêté, or the latest arrêté amending it."""
         results = self._call(
             '/search',
             {
@@ -116,14 +129,31 @@ class LegifranceClient:
                 },
             },
         ).get('results', [])
-        for result in results:
-            for title in result.get('titles', []):
-                text = _strip_tags(title.get('title', ''))
-                if TITLE_PATTERN.match(text):
-                    return title['cid'], text
-        raise DownloadUnavailable(
-            'No arrêté fixing the list of French schools abroad found.'
+        # Newest first, so the first yearly arrêté is the current one and the
+        # first amendment of it, the latest.
+        titles = [
+            (title['cid'], _strip_tags(title.get('title', '')))
+            for result in results
+            for title in result.get('titles', [])
+        ]
+        yearly = next(
+            (
+                (cid, text, match['date'])
+                for cid, text in titles
+                if (match := YEARLY_TITLE_PATTERN.match(text))
+            ),
+            None,
         )
+        if yearly is None:
+            raise LegifranceFormatError(
+                'No arrêté fixing the list of French schools abroad found.'
+            )
+        yearly_cid, yearly_text, yearly_date = yearly
+        for cid, text in titles:
+            match = AMENDING_TITLE_PATTERN.match(text)
+            if match and match['date'] == yearly_date:
+                return cid, text
+        return yearly_cid, yearly_text
 
     def schools_abroad(self) -> tuple[str, list[SchoolAbroad]]:
         """The title of the latest arrêté and the schools listed in its annex."""
@@ -152,7 +182,7 @@ class LegifranceClient:
                     )
                 )
         if not schools:
-            raise DownloadUnavailable(f'No school found in [{title}].')
+            raise LegifranceFormatError(f'No school found in [{title}].')
         return title, schools
 
 
