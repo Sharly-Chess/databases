@@ -27,6 +27,8 @@ jobs:
       - name: Generate FRA Schools SQLite database
         env:
           ENC_PASSWORD: ${{ secrets.FRA_SCHOOLS_DATABASE_ENC_PASSWORD }}
+          PISTE_CLIENT_ID: ${{ secrets.PISTE_CLIENT_ID }}
+          PISTE_CLIENT_SECRET: ${{ secrets.PISTE_CLIENT_SECRET }}
         run: python -u src/fra_schools/generate_fra_schools_sqlite.py --key="$ENC_PASSWORD"
 
       - name: Publish to GitHub Release
@@ -46,7 +48,14 @@ jobs:
             exit 0
           fi
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ENC_DB_FILENAME" $MARKER \
+          gh release create "$TAG" "$ENC_DB_FILENAME" fra_schools_abroad.json $MARKER \
             --title "FRA Schools Database" \
-            --notes "Auto-updated daily" \
+            --notes-file fra_schools_release_notes.md \
             --latest=false
+
+      - name: Check the schools abroad
+        run: |
+          if [ -f fra_schools_abroad_error.txt ]; then
+            echo "::error::Légifrance no longer answers as expected, the previous schools abroad were kept: $(cat fra_schools_abroad_error.txt)"
+            exit 1
+          fi
