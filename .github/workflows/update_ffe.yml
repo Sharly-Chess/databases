@@ -39,15 +39,17 @@ jobs:
             echo "::warning::No marker found."
             echo "no-marker" > $MARKER
           fi
-          ENC_DB_FILENAME=$(python -c "from ffe.generate_ffe_sqlite import FfeSqliteGenerator as sqlite_generator; print(sqlite_generator().output_file)")
+          FILES=$(python -c "from ffe.generate_ffe_sqlite import FfeSqliteGenerator as g; s=g(); print(s.output_file, *[s.output_file_for_version(v) for v in s.legacy_versions])")
           TAG="ffe-latest"
-          if [ ! -f "$ENC_DB_FILENAME" ]; then
-            echo "Expected file [$$ENC_DB_FILENAME] not found; keeping previous release."
-            gh release upload "$TAG" $MARKER
-            exit 0
-          fi
+          for f in $FILES; do
+            if [ ! -f "$f" ]; then
+              echo "Expected files [$FILES] not found; keeping previous release."
+              gh release upload "$TAG" $MARKER
+              exit 0
+            fi
+          done
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ENC_DB_FILENAME" $MARKER \
+          gh release create "$TAG" $FILES $MARKER \
             --title "FFE Database" \
             --notes "Auto-updated daily" \
             --latest=false

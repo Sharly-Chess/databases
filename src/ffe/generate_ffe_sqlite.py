@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 Standalone script: download the FFE player database (Data.mdb), convert it to SQLite,
-and enrich it with arbiter titles scraped from the FFE website.
+and enrich it with arbiter titles scraped from the FFE website and the tutor capacity
+scraped from the DNA website.
 Does not depend on the full Sharly Chess app environment — only requires `requests`.
 """
 
@@ -13,10 +14,12 @@ import stat
 import subprocess
 import sys
 import tarfile
+import unicodedata
 import zipfile
 from html.parser import HTMLParser
 from pathlib import Path
-from sqlite3 import Connection, Cursor
+from sqlite3 import Connection, Cursor, connect
+from typing import Callable
 
 import requests
 
@@ -31,6 +34,7 @@ sys.path.extend(
     )
 )
 
+from aes_ecb import AesEcb
 from progress import Progress
 from sqlite_generator import SqliteGenerator
 
@@ -114,14 +118,20 @@ class FfeSqliteGenerator(SqliteGenerator):
             'POL',
             'REU',
         ]
+        # The national titles of the 2026 arbitration reform. FIDE and International
+        # Arbiters are FIDE titles, they are listed by the FFE with their national title.
         self.arbiter_title_from_html = {
             'Arbitre Jeune': 'AFJ',
+            'Arbitre Match': 'AFM',
             'Arbitre Club': 'AFC',
-            'Arbitre Open 1': 'AFO1',
-            'Arbitre Open 2': 'AFO2',
-            'Arbitre Elite 1': 'AFE1',
-            'Arbitre Elite 2': 'AFE2',
+            'Arbitre Open': 'AFO',
         }
+        self.dna_tutors_url: str = 'https://dna.ffechecs.fr/liste-tuteurs/'
+        # The DNA website rejects requests without a browser user agent.
+        self.dna_user_agent: str = (
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 '
+            '(KHTML, like Gecko) Chrome/128.0 Safari/537.36'
+        )
 
     @property
     def description(self) -> str:
@@ -129,11 +139,30 @@ class FfeSqliteGenerator(SqliteGenerator):
 
     @property
     def version(self) -> int:
-        return 1
+        return 2
 
     @property
     def default_output_filename(self) -> str:
         return f'ffe_players_v{self.version}.enc'
+
+    @property
+    def legacy_versions(self) -> list[int]:
+        # Older clients look the database up by its versioned filename, so for
+        # each version listed here we publish a file with that schema, derived
+        # from the current database. Add an entry (and a builder in
+        # `_legacy_builders`) whenever the schema changes.
+        return [1]
+
+    def output_file_for_version(self, version: int) -> Path:
+        # Sits next to the current output (default or --output), only the
+        # version in the filename differs.
+        return self.output_file.with_name(f'ffe_players_v{version}.enc')
+
+    @property
+    def _legacy_builders(self) -> dict[int, Callable[[Path], Path]]:
+        return {
+            1: self.build_v1_database,
+        }
 
     @property
     def db_file(self) -> Path:
@@ -273,7 +302,8 @@ class FfeSqliteGenerator(SqliteGenerator):
             raise RuntimeError('SQLite database was not created')
 
         arbiters = self.scrape_ffe_arbiters()
-        self.enrich_with_arbiter_titles(database, arbiters)
+        tutors = self.match_tutors(arbiters, self.scrape_dna_tutors())
+        self.enrich_with_arbiter_titles(database, arbiters, tutors)
         database.close()
 
         size_mb = sqlite_file.stat().st_size / 1_048_576
@@ -289,8 +319,8 @@ class FfeSqliteGenerator(SqliteGenerator):
     def _validate_ffe_licence(s: str) -> bool:
         return bool(re.match(r'^[A-Z]\d{5}$', s))
 
-    def scrape_ffe_arbiters(self) -> dict[str, str]:
-        """Returns {ffe_licence_number: arbiter_title_string} for all leagues."""
+    def scrape_ffe_arbiters(self) -> dict[str, tuple[str, str, str]]:
+        """Returns {ffe_licence_number: (arbiter_title, name, league)} for all leagues."""
         print('Scraping FFE arbiter titles...')
         session = requests.Session()
 
@@ -301,7 +331,7 @@ class FfeSqliteGenerator(SqliteGenerator):
         viewstate = p.viewstate
         viewstate_generator = p.viewstate_generator
 
-        arbiters: dict[str, str] = {}
+        arbiters: dict[str, tuple[str, str, str]] = {}
 
         progress: Progress = Progress(len(self.ffe_leagues), delay=1)
         for index, league in enumerate(self.ffe_leagues, start=1):
@@ -334,7 +364,9 @@ class FfeSqliteGenerator(SqliteGenerator):
                     if len(row) >= 3 and self._validate_ffe_licence(row[0]):
                         title = self.arbiter_title_from_html.get(row[2], '')
                         if title:
-                            arbiters[row[0]] = title
+                            arbiters[row[0]] = (title, row[1], league)
+                        else:
+                            print(f'::warning::Unknown arbiter title [{row[2]}] for [{row[0]}].')
 
                 if not p.has_next_page:
                     break
@@ -344,19 +376,119 @@ class FfeSqliteGenerator(SqliteGenerator):
         print(f'Scraped {len(arbiters)} arbiters in total.')
         return arbiters
 
+    def scrape_dna_tutors(self) -> list[tuple[str, str]]:
+        """Returns the (name, league) of the arbiters who can deliver internship certificates
+        (ASP). The list is published without licence numbers. The players database is still
+        worth publishing when the DNA website is down, so failures only produce a warning."""
+        print(f'Scraping DNA tutors from [{self.dna_tutors_url}]...')
+        try:
+            response = requests.get(
+                self.dna_tutors_url,
+                headers={'User-Agent': self.dna_user_agent, 'Accept': 'text/html'},
+                timeout=30,
+            )
+            response.raise_for_status()
+        except requests.RequestException as error:
+            print(f'::warning::Could not read the DNA tutors: {error}.')
+            return []
+        p = FFEPageParser()
+        p.feed(response.text)
+        tutors: list[tuple[str, str]] = [
+            (row[0], row[1]) for row in p.rows if len(row) >= 2 and row[1] in self.ffe_leagues
+        ]
+        if not tutors:
+            print('::warning::No DNA tutors found.')
+        print(f'Scraped {len(tutors)} tutors.')
+        return tutors
+
+    @staticmethod
+    def _normalize_name(name: str) -> str:
+        name = unicodedata.normalize('NFKD', name)
+        name = ''.join(c for c in name if not unicodedata.combining(c))
+        return ' '.join(re.sub(r'[^A-Z0-9]+', ' ', name.upper()).split())
+
+    @classmethod
+    def match_tutors(
+        cls,
+        arbiters: dict[str, tuple[str, str, str]],
+        tutors: list[tuple[str, str]],
+    ) -> set[str]:
+        """Returns the licence numbers of the tutors, matched on the name in the arbiters list,
+        in the tutor's league first, then in all leagues. Ambiguous names are not matched."""
+        licences_by_name: dict[str, list[tuple[str, str]]] = {}
+        for licence, (_, name, league) in arbiters.items():
+            licences_by_name.setdefault(cls._normalize_name(name), []).append((licence, league))
+        tutor_licences: set[str] = set()
+        for name, league in tutors:
+            candidates = licences_by_name.get(cls._normalize_name(name), [])
+            league_candidates = [licence for licence, lg in candidates if lg == league]
+            if len(league_candidates) == 1:
+                tutor_licences.add(league_candidates[0])
+            elif not league_candidates and len(candidates) == 1:
+                tutor_licences.add(candidates[0][0])
+            else:
+                print(f'Tutor [{name}] ({league}) not matched ({len(candidates)} candidates).')
+        print(f'Matched {len(tutor_licences)} of {len(tutors)} tutors.')
+        return tutor_licences
+
     @staticmethod
     def enrich_with_arbiter_titles(
         database: Connection,
-        arbiters: dict[str, str],
+        arbiters: dict[str, tuple[str, str, str]],
+        tutors: set[str],
     ):
         print('Writing arbiter titles into SQLite...')
         database.execute('ALTER TABLE player ADD COLUMN ffe_arbiter_title TEXT')
+        database.execute('ALTER TABLE player ADD COLUMN ffe_arbiter_tutor INTEGER NOT NULL DEFAULT 0')
         database.executemany(
             'UPDATE player SET ffe_arbiter_title = ? WHERE ffe_licence_number = ?',
-            [(title, licence) for licence, title in arbiters.items()],
+            [(title, licence) for licence, (title, _, _) in arbiters.items()],
+        )
+        database.executemany(
+            'UPDATE player SET ffe_arbiter_tutor = 1 WHERE ffe_licence_number = ?',
+            [(licence,) for licence in tutors],
         )
         database.commit()
         print('Done.')
+
+    def post_run(
+        self,
+        sqlite_file: Path,
+    ):
+        for version in self.legacy_versions:
+            builder = self._legacy_builders.get(version)
+            if builder is None:
+                raise ValueError(f'No legacy database builder for version {version}')
+            legacy_file: Path = builder(sqlite_file)
+            legacy_output: Path = self.output_file_for_version(version)
+            AesEcb.encrypt_file(legacy_file, legacy_output, self.key)
+            print(f'Legacy (v{version}) database encrypted to {legacy_output}.')
+
+    @staticmethod
+    def build_v1_database(
+        sqlite_file: Path,
+    ) -> Path:
+        """Build the v1 database (titles before the 2026 reform, no tutor column) from the
+        current one. Each new title is mapped to the closest title known by v1 clients."""
+        print('Deriving legacy (v1) database...')
+        legacy_file: Path = sqlite_file.with_name('Data_v1.db')
+        shutil.copy(sqlite_file, legacy_file)
+        database: Connection = connect(legacy_file)
+        database.execute(
+            """
+        UPDATE `player` SET `ffe_arbiter_title` = CASE `ffe_arbiter_title`
+            WHEN 'AFM' THEN 'AFC'
+            WHEN 'AFO' THEN 'AFO1'
+            ELSE `ffe_arbiter_title`
+        END
+        """
+        )
+        database.execute('ALTER TABLE `player` DROP COLUMN `ffe_arbiter_tutor`')
+        database.commit()
+        database.execute('VACUUM')
+        database.close()
+        print('Legacy (v1) database built.')
+        return legacy_file
 
 
 if __name__ == '__main__':
