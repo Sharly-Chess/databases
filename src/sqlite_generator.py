@@ -23,9 +23,12 @@ from downloader import (
 class SqliteGenerator(Downloader, ABC):
     """An abstract SQLite generator class."""
 
+    MARKER_DATE_FORMAT: str = '%Y-%m-%d-%H-%M'
+    MARKER_TIMEZONE: ZoneInfo = ZoneInfo('Europe/Paris')
+
     def __init__(self):
         super().__init__()
-        self.start_date: str = datetime.now(tz=ZoneInfo('Europe/Paris')).strftime('%Y-%m-%d-%H-%M')
+        self.start_date: str = datetime.now(tz=self.MARKER_TIMEZONE).strftime(self.MARKER_DATE_FORMAT)
         self.output_file: Path = Path(self.default_output_filename)
         self.key: str = ''
         self.force_update: bool = False
@@ -88,18 +91,32 @@ class SqliteGenerator(Downloader, ABC):
         except json.JSONDecodeError as error:
             print(f'Invalid response from GitHub: {error}.')
             return None
-        update_field: str = 'updated_at'
-        if not (release_date := data.get(update_field, '')):
-            create_field: str = 'created_at'
-            if not (release_date := data.get(create_field, '')):
-                print(f'Fields [{update_field}] and [{create_field}] not found.')
-                print(json.dumps(data, sort_keys=True, indent=4))
-                return None
+        # The markers of the runs that did not update the database are added to the
+        # release, which changes its `updated_at`, so the date of the data is the start
+        # of the last run that updated it, read from the name of its marker.
+        update_marker = re.compile(
+            rf'^{re.escape(self.marker_prefix)}_(\d{{4}}-\d{{2}}-\d{{2}}-\d{{2}}-\d{{2}})_update$'
+        )
+        marker_dates: list[datetime] = [
+            datetime.strptime(match.group(1), self.MARKER_DATE_FORMAT).replace(tzinfo=self.MARKER_TIMEZONE)
+            for asset in data.get('assets', [])
+            if (match := update_marker.match(asset.get('name', '')))
+        ]
+        if marker_dates:
+            release_date = max(marker_dates)
+            print(f'Last update of [{tag}] on GitHub started at [{release_date.isoformat()}].')
+            return int(release_date.timestamp())
+        # The release is recreated by each update.
+        published_field: str = 'published_at'
+        if not (published_at := data.get(published_field, '')):
+            print(f'No update marker and no field [{published_field}] found.')
+            print(json.dumps(data, sort_keys=True, indent=4))
+            return None
         try:
-            print(f'Date of [{tag}] on GitHub is [{release_date}].')
-            return int(datetime.fromisoformat(release_date).timestamp())
+            print(f'Publication date of [{tag}] on GitHub is [{published_at}].')
+            return int(datetime.fromisoformat(published_at).timestamp())
         except (TypeError, ValueError) as error:
-            print(f'Invalid release date [{release_date}]: {error}.')
+            print(f'Invalid release date [{published_at}]: {error}.')
             return None
 
     @classmethod

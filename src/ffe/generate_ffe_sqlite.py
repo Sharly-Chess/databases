@@ -14,9 +14,12 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from sqlite3 import Connection, Cursor
+from sqlite3 import Connection, Cursor, connect
+from typing import Callable
 
 import requests
 
@@ -31,6 +34,7 @@ sys.path.extend(
     )
 )
 
+from aes_ecb import AesEcb
 from progress import Progress
 from sqlite_generator import SqliteGenerator
 
@@ -114,14 +118,26 @@ class FfeSqliteGenerator(SqliteGenerator):
             'POL',
             'REU',
         ]
+        # The national titles of the 2026 arbitration reform. FIDE and International
+        # Arbiters are FIDE titles, they are listed by the FFE with their national title.
         self.arbiter_title_from_html = {
             'Arbitre Jeune': 'AFJ',
+            'Arbitre Match': 'AFM',
             'Arbitre Club': 'AFC',
-            'Arbitre Open 1': 'AFO1',
-            'Arbitre Open 2': 'AFO2',
-            'Arbitre Elite 1': 'AFE1',
-            'Arbitre Elite 2': 'AFE2',
+            'Arbitre Open': 'AFO',
         }
+        # The FIDE titles of the arbiters are only shown on their player page. The FIDE
+        # agreement of national arbiters is not a title.
+        self.fide_arbiter_title_from_html = {
+            'Agrément FIDE': '',
+            'Arbitre Fide': 'FA',
+            'Arbitre International': 'IA',
+        }
+        self.fide_arbiter_title_pattern = re.compile(
+            r'id="ctl00_ContentPlaceHolderMain_LabelArbitreFide">([^<]*)<'
+        )
+        self.fide_arbiter_page_workers: int = 8
+        self.fide_arbiter_page_max_attempts: int = 3
 
     @property
     def description(self) -> str:
@@ -129,11 +145,30 @@ class FfeSqliteGenerator(SqliteGenerator):
 
     @property
     def version(self) -> int:
-        return 1
+        return 2
 
     @property
     def default_output_filename(self) -> str:
         return f'ffe_players_v{self.version}.enc'
+
+    @property
+    def legacy_versions(self) -> list[int]:
+        # Older clients look the database up by its versioned filename, so for
+        # each version listed here we publish a file with that schema, derived
+        # from the current database. Add an entry (and a builder in
+        # `_legacy_builders`) whenever the schema changes.
+        return [1]
+
+    def output_file_for_version(self, version: int) -> Path:
+        # Sits next to the current output (default or --output), only the
+        # version in the filename differs.
+        return self.output_file.with_name(f'ffe_players_v{version}.enc')
+
+    @property
+    def _legacy_builders(self) -> dict[int, Callable[[Path], Path]]:
+        return {
+            1: self.build_v1_database,
+        }
 
     @property
     def db_file(self) -> Path:
@@ -274,6 +309,7 @@ class FfeSqliteGenerator(SqliteGenerator):
 
         arbiters = self.scrape_ffe_arbiters()
         self.enrich_with_arbiter_titles(database, arbiters)
+        self.enrich_with_fide_arbiter_titles(database)
         database.close()
 
         size_mb = sqlite_file.stat().st_size / 1_048_576
@@ -290,7 +326,7 @@ class FfeSqliteGenerator(SqliteGenerator):
         return bool(re.match(r'^[A-Z]\d{5}$', s))
 
     def scrape_ffe_arbiters(self) -> dict[str, str]:
-        """Returns {ffe_licence_number: arbiter_title_string} for all leagues."""
+        """Returns {ffe_licence_number: arbiter_title} for all leagues."""
         print('Scraping FFE arbiter titles...')
         session = requests.Session()
 
@@ -335,6 +371,8 @@ class FfeSqliteGenerator(SqliteGenerator):
                         title = self.arbiter_title_from_html.get(row[2], '')
                         if title:
                             arbiters[row[0]] = title
+                        else:
+                            print(f'::warning::Unknown arbiter title [{row[2]}] for [{row[0]}].')
 
                 if not p.has_next_page:
                     break
@@ -357,6 +395,101 @@ class FfeSqliteGenerator(SqliteGenerator):
         )
         database.commit()
         print('Done.')
+
+    def read_fide_arbiter_title(
+        self,
+        session: requests.Session,
+        ffe_id: int,
+    ) -> str | None:
+        """Returns the FIDE arbiter title shown on the player page, None on failure."""
+        url: str = f'{self.ffe_public_url}/FicheJoueur.aspx?Id={ffe_id}'
+        for attempt in range(1, self.fide_arbiter_page_max_attempts + 1):
+            try:
+                response = session.get(url, timeout=30)
+                response.raise_for_status()
+                break
+            except requests.RequestException as error:
+                if attempt == self.fide_arbiter_page_max_attempts:
+                    print(f'::warning::Could not read the player page of [{ffe_id}]: {error}.')
+                    return None
+                print(f'Could not read the player page of [{ffe_id}] (attempt {attempt}): {error}.')
+        if not (match := self.fide_arbiter_title_pattern.search(response.text)):
+            print(f'::warning::No FIDE arbiter title field on the player page of [{ffe_id}].')
+            return None
+        label: str = unescape(match.group(1)).strip()
+        if label and label not in self.fide_arbiter_title_from_html:
+            print(f'::warning::Unknown FIDE arbiter title [{label}] for [{ffe_id}].')
+        return self.fide_arbiter_title_from_html.get(label, '')
+
+    def enrich_with_fide_arbiter_titles(
+        self,
+        database: Connection,
+    ):
+        """Reads the FIDE arbiter titles from the pages of the Open arbiters, the
+        national title required to become a FIDE Arbiter."""
+        database.execute('ALTER TABLE player ADD COLUMN fide_arbiter_title TEXT')
+        ffe_ids: list[int] = [
+            row[0] for row in database.execute("SELECT ffe_id FROM player WHERE ffe_arbiter_title = 'AFO'")
+        ]
+        print(f'Reading the FIDE arbiter titles of {len(ffe_ids)} arbiters...')
+        session = requests.Session()
+        with ThreadPoolExecutor(max_workers=self.fide_arbiter_page_workers) as executor:
+            titles: list[str | None] = list(
+                executor.map(lambda ffe_id: self.read_fide_arbiter_title(session, ffe_id), ffe_ids)
+            )
+        database.executemany(
+            'UPDATE player SET fide_arbiter_title = ? WHERE ffe_id = ?',
+            [(title, ffe_id) for ffe_id, title in zip(ffe_ids, titles) if title],
+        )
+        database.commit()
+        found: dict[str, int] = {}
+        for title in titles:
+            if title:
+                found[title] = found.get(title, 0) + 1
+        failures: int = sum(1 for title in titles if title is None)
+        print(f'FIDE arbiter titles: {found}, {failures} pages could not be read.')
+
+    def post_run(
+        self,
+        sqlite_file: Path,
+    ):
+        for version in self.legacy_versions:
+            builder = self._legacy_builders.get(version)
+            if builder is None:
+                raise ValueError(f'No legacy database builder for version {version}')
+            legacy_file: Path = builder(sqlite_file)
+            legacy_output: Path = self.output_file_for_version(version)
+            AesEcb.encrypt_file(legacy_file, legacy_output, self.key)
+            print(f'Legacy (v{version}) database encrypted to {legacy_output}.')
+
+    @staticmethod
+    def build_v1_database(
+        sqlite_file: Path,
+    ) -> Path:
+        """Build the v1 database (titles before the 2026 reform, no FIDE arbiter title
+        column) from the current one. Each new title is mapped to the closest title
+        known by v1 clients, the FIDE and International Arbiters to the Elite titles."""
+        print('Deriving legacy (v1) database...')
+        legacy_file: Path = sqlite_file.with_name('Data_v1.db')
+        shutil.copy(sqlite_file, legacy_file)
+        database: Connection = connect(legacy_file)
+        database.execute(
+            """
+        UPDATE `player` SET `ffe_arbiter_title` = CASE
+            WHEN `fide_arbiter_title` = 'IA' THEN 'AFE2'
+            WHEN `fide_arbiter_title` = 'FA' THEN 'AFE1'
+            WHEN `ffe_arbiter_title` = 'AFM' THEN 'AFC'
+            WHEN `ffe_arbiter_title` = 'AFO' THEN 'AFO1'
+            ELSE `ffe_arbiter_title`
+        END
+        """
+        )
+        database.execute('ALTER TABLE `player` DROP COLUMN `fide_arbiter_title`')
+        database.commit()
+        database.execute('VACUUM')
+        database.close()
+        print('Legacy (v1) database built.')
+        return legacy_file
 
 
 if __name__ == '__main__':
