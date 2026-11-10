@@ -5,7 +5,6 @@ and enrich it with arbiter titles scraped from the FFE website.
 Does not depend on the full Sharly Chess app environment — only requires `requests`.
 """
 
-import argparse
 import os
 import platform
 import re
@@ -15,6 +14,8 @@ import subprocess
 import sys
 import tarfile
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
+from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
 from sqlite3 import Connection, Cursor, connect
@@ -34,7 +35,6 @@ sys.path.extend(
 )
 
 from aes_ecb import AesEcb
-from fide.generate_fide_sqlite import FideSqliteGenerator
 from progress import Progress
 from sqlite_generator import SqliteGenerator
 
@@ -126,34 +126,22 @@ class FfeSqliteGenerator(SqliteGenerator):
             'Arbitre Club': 'AFC',
             'Arbitre Open': 'AFO',
         }
-        # The FFE lists the FIDE and International Arbiters with their national title,
-        # their FIDE titles are read from the FIDE database published by this repository.
-        self.fide_database_url: str = (
-            'https://github.com/Sharly-Chess/databases/releases/download/fide-latest/'
-            f'{FideSqliteGenerator().default_output_filename}'
+        # The FIDE titles of the arbiters are only shown on their player page. The FIDE
+        # agreement of national arbiters is not a title.
+        self.fide_arbiter_title_from_html = {
+            'Agrément FIDE': '',
+            'Arbitre Fide': 'FA',
+            'Arbitre International': 'IA',
+        }
+        self.fide_arbiter_title_pattern = re.compile(
+            r'id="ctl00_ContentPlaceHolderMain_LabelArbitreFide">([^<]*)<'
         )
-        self.fide_key: str = ''
+        self.fide_arbiter_page_workers: int = 8
+        self.fide_arbiter_page_max_attempts: int = 3
 
     @property
     def description(self) -> str:
         return 'Generate FFE Player database'
-
-    def add_arguments(
-        self,
-        parser: argparse.ArgumentParser,
-    ):
-        parser.add_argument(
-            '--fide-key',
-            type=str,
-            required=True,
-            help='Key used to decrypt the FIDE database',
-        )
-
-    def read_arguments(
-        self,
-        args: argparse.Namespace,
-    ):
-        self.fide_key = args.fide_key
 
     @property
     def version(self) -> int:
@@ -195,9 +183,8 @@ class FfeSqliteGenerator(SqliteGenerator):
         tmp_dir: Path,
     ) -> Path:
         mdb_path: Path = self.download_ffe_mdb(tmp_dir)
-        fide_sqlite_file: Path = self.download_fide_database(tmp_dir)
         papi_converter: Path = self.download_papi_converter(tmp_dir)
-        return self.convert_mdb_to_sqlite(papi_converter, mdb_path, fide_sqlite_file)
+        return self.convert_mdb_to_sqlite(papi_converter, mdb_path)
 
     @staticmethod
     def get_papi_converter_info() -> tuple[str, str, str]:
@@ -284,28 +271,10 @@ class FfeSqliteGenerator(SqliteGenerator):
             raise RuntimeError(f'[{self.mdb_filename}] not found after extraction')
         return mdb_path
 
-    def download_fide_database(
-        self,
-        target_dir: Path,
-    ) -> Path:
-        """Downloads and decrypts the FIDE database, before scraping the FFE website so
-        that a run without the FIDE arbiter titles stops early."""
-        print(f'Downloading FIDE database from [{self.fide_database_url}]...')
-        encrypted_file: Path = self._download_file(
-            self.fide_database_url,
-            target_dir,
-            max_attempts=self.download_max_attempts,
-        )
-        fide_sqlite_file: Path = target_dir / 'fide_players.db'
-        AesEcb.decrypt_file(encrypted_file, fide_sqlite_file, self.fide_key)
-        encrypted_file.unlink()
-        return fide_sqlite_file
-
     def convert_mdb_to_sqlite(
         self,
         papi_converter: Path,
         mdb_path: Path,
-        fide_sqlite_file: Path,
     ) -> Path:
         sqlite_file: Path = mdb_path.with_suffix('.db')
         sql_path = mdb_path.with_suffix('.sql')
@@ -340,7 +309,7 @@ class FfeSqliteGenerator(SqliteGenerator):
 
         arbiters = self.scrape_ffe_arbiters()
         self.enrich_with_arbiter_titles(database, arbiters)
-        self.enrich_with_fide_arbiter_titles(database, fide_sqlite_file)
+        self.enrich_with_fide_arbiter_titles(database)
         database.close()
 
         size_mb = sqlite_file.stat().st_size / 1_048_576
@@ -427,35 +396,58 @@ class FfeSqliteGenerator(SqliteGenerator):
         database.commit()
         print('Done.')
 
-    @staticmethod
+    def read_fide_arbiter_title(
+        self,
+        session: requests.Session,
+        ffe_id: int,
+    ) -> str | None:
+        """Returns the FIDE arbiter title shown on the player page, None on failure."""
+        url: str = f'{self.ffe_public_url}/FicheJoueur.aspx?Id={ffe_id}'
+        for attempt in range(1, self.fide_arbiter_page_max_attempts + 1):
+            try:
+                response = session.get(url, timeout=30)
+                response.raise_for_status()
+                break
+            except requests.RequestException as error:
+                if attempt == self.fide_arbiter_page_max_attempts:
+                    print(f'::warning::Could not read the player page of [{ffe_id}]: {error}.')
+                    return None
+                print(f'Could not read the player page of [{ffe_id}] (attempt {attempt}): {error}.')
+        if not (match := self.fide_arbiter_title_pattern.search(response.text)):
+            print(f'::warning::No FIDE arbiter title field on the player page of [{ffe_id}].')
+            return None
+        label: str = unescape(match.group(1)).strip()
+        if label and label not in self.fide_arbiter_title_from_html:
+            print(f'::warning::Unknown FIDE arbiter title [{label}] for [{ffe_id}].')
+        return self.fide_arbiter_title_from_html.get(label, '')
+
     def enrich_with_fide_arbiter_titles(
+        self,
         database: Connection,
-        fide_sqlite_file: Path,
     ):
-        """Sets the FIDE arbiter titles of the Open arbiters, the national title required
-        to become a FIDE Arbiter. The FIDE agreement of national arbiters is not a title."""
-        print('Writing FIDE arbiter titles into SQLite...')
+        """Reads the FIDE arbiter titles from the pages of the Open arbiters, the
+        national title required to become a FIDE Arbiter."""
         database.execute('ALTER TABLE player ADD COLUMN fide_arbiter_title TEXT')
-        database.execute('ATTACH DATABASE ? AS fide', (str(fide_sqlite_file),))
-        database.execute(
-            """
-        UPDATE `player` SET `fide_arbiter_title` = (
-            SELECT `fide_player`.`fide_arbiter_title` FROM `fide`.`player` AS `fide_player`
-            WHERE `fide_player`.`fide_id` = CAST(TRIM(`player`.`fide_id`) AS INTEGER)
-            AND `fide_player`.`fide_arbiter_title` IN ('FA', 'IA')
-        )
-        WHERE `ffe_arbiter_title` = 'AFO'
-        """
+        ffe_ids: list[int] = [
+            row[0] for row in database.execute("SELECT ffe_id FROM player WHERE ffe_arbiter_title = 'AFO'")
+        ]
+        print(f'Reading the FIDE arbiter titles of {len(ffe_ids)} arbiters...')
+        session = requests.Session()
+        with ThreadPoolExecutor(max_workers=self.fide_arbiter_page_workers) as executor:
+            titles: list[str | None] = list(
+                executor.map(lambda ffe_id: self.read_fide_arbiter_title(session, ffe_id), ffe_ids)
+            )
+        database.executemany(
+            'UPDATE player SET fide_arbiter_title = ? WHERE ffe_id = ?',
+            [(title, ffe_id) for ffe_id, title in zip(ffe_ids, titles) if title],
         )
         database.commit()
-        database.execute('DETACH DATABASE fide')
-        found: dict[str, int] = dict(
-            database.execute(
-                'SELECT `fide_arbiter_title`, COUNT(*) FROM `player` '
-                'WHERE `fide_arbiter_title` IS NOT NULL GROUP BY `fide_arbiter_title`'
-            ).fetchall()
-        )
-        print(f'FIDE arbiter titles: {found}.')
+        found: dict[str, int] = {}
+        for title in titles:
+            if title:
+                found[title] = found.get(title, 0) + 1
+        failures: int = sum(1 for title in titles if title is None)
+        print(f'FIDE arbiter titles: {found}, {failures} pages could not be read.')
 
     def post_run(
         self,
