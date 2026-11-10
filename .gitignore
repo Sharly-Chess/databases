@@ -6,3 +6,4 @@
 __pycache__/
 *.pyc
 /src/sharly_chess_databases.egg-info/
+/ffe_fide_arbiter_titles.json

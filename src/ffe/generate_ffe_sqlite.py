@@ -5,6 +5,7 @@ and enrich it with arbiter titles scraped from the FFE website.
 Does not depend on the full Sharly Chess app environment — only requires `requests`.
 """
 
+import json
 import os
 import platform
 import re
@@ -15,6 +16,7 @@ import sys
 import tarfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date, timedelta
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
@@ -138,6 +140,14 @@ class FfeSqliteGenerator(SqliteGenerator):
         )
         self.fide_arbiter_page_workers: int = 8
         self.fide_arbiter_page_max_attempts: int = 3
+        # The FIDE arbiter titles read from the player pages are cached in the release,
+        # only the pages of the new Open arbiters and of a few stale entries are read.
+        self.fide_arbiter_titles_url: str = (
+            'https://github.com/Sharly-Chess/databases/releases/download/ffe-latest/'
+            'ffe_fide_arbiter_titles.json'
+        )
+        self.fide_arbiter_title_max_age: timedelta = timedelta(days=30)
+        self.fide_arbiter_title_max_refreshes: int = 50
 
     @property
     def description(self) -> str:
@@ -169,6 +179,10 @@ class FfeSqliteGenerator(SqliteGenerator):
         return {
             1: self.build_v1_database,
         }
+
+    @property
+    def fide_arbiter_titles_file(self) -> Path:
+        return self.output_file.with_name('ffe_fide_arbiter_titles.json')
 
     @property
     def db_file(self) -> Path:
@@ -421,32 +435,89 @@ class FfeSqliteGenerator(SqliteGenerator):
             print(f'::warning::Unknown FIDE arbiter title [{label}] for [{ffe_id}].')
         return self.fide_arbiter_title_from_html.get(label, '')
 
+    def read_fide_arbiter_titles_cache(self) -> dict[str, dict[str, str]]:
+        """Returns the cached {ffe_id: {'title': ..., 'checked': ISO date}}, empty when
+        the cache can not be read, in which case all the pages are read."""
+        print(f'Reading the cached FIDE arbiter titles from [{self.fide_arbiter_titles_url}]...')
+        try:
+            response = requests.get(self.fide_arbiter_titles_url, timeout=30)
+            if response.status_code == 404:
+                print('No cached FIDE arbiter titles.')
+                return {}
+            response.raise_for_status()
+            cache: dict[str, dict[str, str]] = response.json()
+            for entry in cache.values():
+                date.fromisoformat(entry['checked'])
+                if entry['title'] not in ('', 'FA', 'IA'):
+                    raise ValueError(f'invalid title [{entry["title"]}]')
+            return cache
+        except (
+            requests.RequestException,
+            ValueError,
+            KeyError,
+            TypeError,
+            AttributeError,
+        ) as error:
+            print(f'::warning::Could not read the cached FIDE arbiter titles: {error}.')
+            return {}
+
     def enrich_with_fide_arbiter_titles(
         self,
         database: Connection,
     ):
         """Reads the FIDE arbiter titles from the pages of the Open arbiters, the
-        national title required to become a FIDE Arbiter."""
+        national title required to become a FIDE Arbiter. The pages read are those of
+        the arbiters not in the cache and of the oldest entries of the cache."""
         database.execute('ALTER TABLE player ADD COLUMN fide_arbiter_title TEXT')
-        ffe_ids: list[int] = [
-            row[0] for row in database.execute("SELECT ffe_id FROM player WHERE ffe_arbiter_title = 'AFO'")
+        ffe_ids: list[str] = [
+            str(row[0])
+            for row in database.execute("SELECT ffe_id FROM player WHERE ffe_arbiter_title = 'AFO'")
         ]
-        print(f'Reading the FIDE arbiter titles of {len(ffe_ids)} arbiters...')
+        previous_cache: dict[str, dict[str, str]] = self.read_fide_arbiter_titles_cache()
+        cache: dict[str, dict[str, str]] = {
+            ffe_id: previous_cache[ffe_id] for ffe_id in ffe_ids if ffe_id in previous_cache
+        }
+        today: date = date.today()
+        new_ids: list[str] = [ffe_id for ffe_id in ffe_ids if ffe_id not in cache]
+        stale_ids: list[str] = sorted(
+            (
+                ffe_id
+                for ffe_id, entry in cache.items()
+                if today - date.fromisoformat(entry['checked']) > self.fide_arbiter_title_max_age
+            ),
+            key=lambda ffe_id: cache[ffe_id]['checked'],
+        )[: self.fide_arbiter_title_max_refreshes]
+        read_ids: list[str] = new_ids + stale_ids
+        print(
+            f'Reading the FIDE arbiter titles of {len(read_ids)} of {len(ffe_ids)} arbiters '
+            f'({len(new_ids)} new, {len(stale_ids)} stale)...'
+        )
         session = requests.Session()
         with ThreadPoolExecutor(max_workers=self.fide_arbiter_page_workers) as executor:
             titles: list[str | None] = list(
-                executor.map(lambda ffe_id: self.read_fide_arbiter_title(session, ffe_id), ffe_ids)
+                executor.map(
+                    lambda ffe_id: self.read_fide_arbiter_title(session, int(ffe_id)),
+                    read_ids,
+                )
             )
+        for ffe_id, title in zip(read_ids, titles):
+            # The pages that could not be read keep their cached title, if any.
+            if title is not None:
+                cache[ffe_id] = {'title': title, 'checked': today.isoformat()}
+        failures: int = sum(1 for title in titles if title is None)
         database.executemany(
             'UPDATE player SET fide_arbiter_title = ? WHERE ffe_id = ?',
-            [(title, ffe_id) for ffe_id, title in zip(ffe_ids, titles) if title],
+            [(entry['title'], int(ffe_id)) for ffe_id, entry in cache.items() if entry['title']],
         )
         database.commit()
+        self.fide_arbiter_titles_file.write_text(
+            json.dumps(cache, indent=0, sort_keys=True),
+            encoding='utf-8',
+        )
         found: dict[str, int] = {}
-        for title in titles:
-            if title:
-                found[title] = found.get(title, 0) + 1
-        failures: int = sum(1 for title in titles if title is None)
+        for entry in cache.values():
+            if entry['title']:
+                found[entry['title']] = found.get(entry['title'], 0) + 1
         print(f'FIDE arbiter titles: {found}, {failures} pages could not be read.')
 
     def post_run(
