@@ -64,9 +64,23 @@ class SqliteGenerator(Downloader, ABC):
             required=True,
             help='Key used for AES-CBC encryption',
         )
+        self.add_arguments(parser)
         args = parser.parse_args()
         self.key = args.key
         self.force_update = args.force_update
+        self.read_arguments(args)
+
+    def add_arguments(
+        self,
+        parser: argparse.ArgumentParser,
+    ):
+        """Adds the arguments specific to a generator."""
+
+    def read_arguments(
+        self,
+        args: argparse.Namespace,
+    ):
+        """Reads the arguments added by `add_arguments`."""
 
     def _get_github_release_date(
         self,

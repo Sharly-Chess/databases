@@ -32,8 +32,9 @@ jobs:
       - name: Generate FFE SQLite database
         env:
           ENC_PASSWORD: ${{ secrets.FFE_DATABASE_ENC_PASSWORD }}
+          FIDE_ENC_PASSWORD: ${{ secrets.FIDE_DATABASE_ENC_PASSWORD }}
         run: |
-          python -u src/ffe/generate_ffe_sqlite.py --key="$ENC_PASSWORD" ${{ inputs.force_update && '--force-update' || '' }}
+          python -u src/ffe/generate_ffe_sqlite.py --key="$ENC_PASSWORD" --fide-key="$FIDE_ENC_PASSWORD" ${{ inputs.force_update && '--force-update' || '' }}
 
       - name: Publish to GitHub Release
         env:
