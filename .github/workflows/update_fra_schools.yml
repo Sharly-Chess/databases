@@ -47,11 +47,8 @@ jobs:
             gh release upload "$TAG" $MARKER
             exit 0
           fi
-          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" "$ENC_DB_FILENAME" fra_schools_abroad.json $MARKER \
-            --title "FRA Schools Database" \
-            --notes-file fra_schools_release_notes.md \
-            --latest=false
+          .github/publish_release.sh "$TAG" "FRA Schools Database" "$(cat fra_schools_release_notes.md)" \
+            "$ENC_DB_FILENAME" fra_schools_abroad.json $MARKER
 
       - name: Check the schools abroad
         run: |

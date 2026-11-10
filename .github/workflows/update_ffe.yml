@@ -53,8 +53,4 @@ jobs:
               exit 0
             fi
           done
-          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
-          gh release create "$TAG" $FILES $MARKER \
-            --title "FFE Database" \
-            --notes "Auto-updated daily" \
-            --latest=false
+          .github/publish_release.sh "$TAG" "FFE Database" "Auto-updated daily" $FILES $MARKER
